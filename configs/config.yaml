@@ -1,0 +1,196 @@
+# ==============================================================================
+# X-MIST / EMIT-HAR: Research Project Configuration
+# Explainable Multimodal Interaction-aware Spatio-Temporal Transformer
+# ==============================================================================
+
+project:
+  name: "emit_har_research"
+  seed: 42
+  device: "cuda"
+  output_dir: "experiments/results"
+  checkpoint_dir: "experiments/checkpoints"
+  log_dir: "experiments/logs"
+
+# ------------------------------------------------------------------------------
+# Taxonomy & Tasks (Phases 1 & 11)
+# ------------------------------------------------------------------------------
+taxonomy:
+  agent_types:
+    - "pedestrian"
+    - "bicycle"
+    - "escooter"
+    - "vehicle"
+  
+  # Task A: Pedestrian Behaviors (8 classes)
+  pedestrian_classes:
+    - "Walking"
+    - "Standing"
+    - "Stopping"
+    - "Starting"
+    - "Turning"
+    - "Crossing"
+    - "Yielding"
+    - "Avoiding"
+
+  # Task B: Micromobility Behaviors (9 classes)
+  micromobility_classes:
+    - "Moving"
+    - "Stopping"
+    - "Starting"
+    - "Turning"
+    - "Accelerating"
+    - "Decelerating"
+    - "Yielding"
+    - "Avoiding"
+    - "Overtaking"
+
+  # Task C: Interaction Behaviors (6 classes)
+  interaction_classes:
+    - "Approaching"
+    - "Yielding"
+    - "Avoiding"
+    - "Overtaking"
+    - "Conflict"
+    - "Cooperative"
+
+  # Scene Semantic Classes
+  scene_classes:
+    - "road"
+    - "sidewalk"
+    - "crosswalk"
+    - "traffic_signal"
+    - "buildings"
+    - "obstacles"
+    - "vehicles"
+    - "cycling_lane"
+    - "pedestrian_area"
+    - "background"
+
+# ------------------------------------------------------------------------------
+# Data & Preprocessing Pipeline (Phases 2-8)
+# ------------------------------------------------------------------------------
+data:
+  raw_dir: "data/raw"
+  pie_dir: "data/raw/PIE"
+  jaad_dir: "data/raw/JAAD"
+  titan_dir: "data/raw/TITAN"
+  microvision_dir: "data/raw/MicroVision"
+  processed_dir: "data/processed"
+  annotations_dir: "data/annotations"
+  splits_dir: "data/splits"
+  window_size: 32           # Temporal window T (experiments with 16, 32, 64)
+  stride: 8                 # Stride for sliding window
+  fps: 10.0                 # Target sampling FPS
+  max_agents: 8             # Max interacting agents tracked per scene
+  image_size: [224, 224]    # Spatial resolution (H, W)
+  num_joints: 18            # 18 COCO keypoints
+  joint_dim: 3              # (x, y, confidence)
+  traj_dim: 5               # (x, y, vx, vy, heading)
+  dt: 0.1                   # Time delta (1/fps)
+
+# ------------------------------------------------------------------------------
+# Model Architecture (Phases 12-19)
+# ------------------------------------------------------------------------------
+model:
+  feature_dim: 256          # Common projection dimension d for all modalities
+  dropout: 0.1
+
+  # Phase 12: Individual Modality Encoders
+  rgb_encoder:
+    backbone: "resnet18"    # Options: resnet18, cnn_lightweight
+    pretrained: false
+    in_channels: 3
+    temporal_pool: "adaptive"
+
+  pose_encoder:
+    num_joints: 18
+    joint_dim: 3
+    hidden_dim: 256
+    num_layers: 2
+    dropout: 0.1
+
+  trajectory_encoder:
+    input_dim: 5            # (x, y, vx, vy, heading)
+    hidden_dim: 256
+    num_layers: 2
+    dropout: 0.1
+
+  scene_encoder:
+    num_classes: 10
+    hidden_dim: 256
+    dropout: 0.1
+
+  # Phase 13: Cross-Modal Attention
+  cross_modal:
+    enabled: true
+    num_heads: 4
+    dim_feedforward: 512
+    dropout: 0.1
+
+  # Phase 14: Modality Gating
+  modality_gating:
+    enabled: true
+    num_modalities: 4       # RGB, Pose, Trajectory, Scene
+    reduction_ratio: 4
+
+  # Phase 15 & 16: Dynamic Interaction Graph & Transformer
+  interaction:
+    enabled: true
+    edge_dim: 4             # [distance, delta_v, delta_heading, ttc]
+    distance_threshold: 12.0 # Spatial neighborhood radius (meters or normalized coords)
+    num_heads: 4
+    num_layers: 2
+    dropout: 0.1
+
+  # Phase 18: Spatio-Temporal Transformer
+  temporal:
+    num_heads: 4
+    num_layers: 3
+    dim_feedforward: 512
+    dropout: 0.1
+
+# ------------------------------------------------------------------------------
+# Training & Optimization (Phases 9-11, 23)
+# ------------------------------------------------------------------------------
+training:
+  epochs: 50
+  batch_size: 16
+  num_workers: 4
+  lr: 0.0001
+  min_lr: 1e-6
+  weight_decay: 0.0001
+  warmup_epochs: 5
+  grad_clip: 1.0
+  mixed_precision: "fp16"   # Options: "no", "fp16", "bf16"
+  save_every: 5
+  eval_every: 1
+  early_stop_patience: 12
+
+  # Phase 19 & 23: Multi-task Loss Weights
+  loss_weights:
+    lambda_ped: 1.0         # Pedestrian behavior loss
+    lambda_micro: 1.0       # Micromobility behavior loss
+    lambda_inter: 1.0       # Interaction behavior loss
+    lambda_align: 0.1       # Cross-modal alignment loss
+    lambda_xai: 0.05        # Explanation consistency regularization
+
+# ------------------------------------------------------------------------------
+# Explainability & Evaluation (Phases 20-22, 26)
+# ------------------------------------------------------------------------------
+explainability:
+  methods: ["attention", "gradient", "perturbation"]
+  temporal_steps: 32
+  faithfulness:
+    deletion_steps: 5
+    insertion_steps: 5
+    perturbation_radius: 0.25
+
+# ------------------------------------------------------------------------------
+# HPC & Distributed Settings
+# ------------------------------------------------------------------------------
+hpc:
+  use_ddp: false            # Auto-enabled when launched with torchrun / Slurm
+  find_unused_parameters: true
+  sync_bn: true
+  wandb_project: "emit-har-research"
+  wandb_mode: "offline"     # Options: "online", "offline", "disabled"
