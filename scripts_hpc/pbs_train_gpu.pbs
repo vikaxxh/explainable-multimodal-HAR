@@ -1,0 +1,38 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: GPU Training on MANIT HPC (PBS Pro / Torque)
+# ==============================================================================
+#PBS -N emit_train_gpu
+#PBS -o experiments/logs/train_gpu.out
+#PBS -e experiments/logs/train_gpu.err
+#PBS -l select=1:ncpus=8:ngpus=1:mem=32gb
+#PBS -l walltime=24:00:00
+#PBS -q gpu
+
+cd $PBS_O_WORKDIR
+
+echo "=========================================================="
+echo "Starting Job: $PBS_JOBID on $(hostname) at $(date)"
+echo "=========================================================="
+
+# 1. Load MANIT Modules
+module purge
+module load compilers/nvidia/cuda/12.2
+module load apps/anaconda-2024.02
+
+# 2. Activate Conda Environment
+source activate emit-har || conda activate emit-har
+
+# 3. Create log directory
+mkdir -p experiments/logs experiments/checkpoints experiments/results
+
+# 4. Run Training
+python train.py \
+    --config configs/config.yaml \
+    --model proposed \
+    --synthetic \
+    --epochs 50 \
+    --batch_size 16 \
+    --lr 0.0001
+
+echo "Job finished at $(date)"
