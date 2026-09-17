@@ -147,10 +147,16 @@ def run_ablation_study(
     csv_path = os.path.join(output_dir, "ablation_comparison_table.csv")
     md_path = os.path.join(output_dir, "ablation_comparison_table.md")
     df.to_csv(csv_path, index=False)
+    
+    try:
+        table_str = df.to_markdown(index=False)
+    except (ImportError, ModuleNotFoundError):
+        table_str = df.to_string(index=False)
+
     with open(md_path, "w") as f:
         f.write("# Thesis Table: Progressive Benchmark & Ablation Comparison\n\n")
-        f.write(df.to_markdown(index=False))
+        f.write(table_str)
 
-    print("\n" + df.to_markdown(index=False) + "\n")
+    print("\n" + table_str + "\n")
     print(f"[Ablation] Results saved to {csv_path} and {md_path}")
     return df
