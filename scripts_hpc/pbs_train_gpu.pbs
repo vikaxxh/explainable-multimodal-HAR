@@ -7,7 +7,8 @@
 #PBS -e experiments/logs/train_gpu.err
 #PBS -l select=1:ncpus=8:ngpus=1:mem=32gb
 #PBS -l walltime=24:00:00
-#PBS -q gpu
+## Optional: Specify queue if known (e.g., #PBS -q workq). Otherwise PBS uses the default queue:
+## #PBS -q gpu
 
 cd $PBS_O_WORKDIR
 
