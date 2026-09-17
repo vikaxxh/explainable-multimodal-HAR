@@ -1,0 +1,42 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Fast Immediate CPU Training on MANIT HPC (short queue)
+# ==============================================================================
+#PBS -N emit_short_cpu
+#PBS -q short
+#PBS -o experiments/logs/train_short.out
+#PBS -e experiments/logs/train_short.err
+#PBS -l select=1:ncpus=10:mem=16gb
+#PBS -l walltime=04:00:00
+
+cd $PBS_O_WORKDIR
+
+echo "=========================================================="
+echo "Starting Fast CPU Job: $PBS_JOBID on $(hostname) at $(date)"
+echo "Using 10 CPU Cores on node $(hostname)"
+echo "=========================================================="
+
+# 1. Load Modules
+module purge 2>/dev/null || true
+module load apps/anaconda-2024.02 2>/dev/null || module load apps/anaconda3 2>/dev/null || true
+
+# 2. Activate Conda Environment
+source $(dirname $(dirname $(which python3)))/etc/profile.d/conda.sh 2>/dev/null || true
+conda activate emit-har 2>/dev/null || source activate emit-har
+
+# 3. Maximize CPU Multi-Threading across all 10 allocated cores
+export OMP_NUM_THREADS=10
+export MKL_NUM_THREADS=10
+
+mkdir -p experiments/logs experiments/checkpoints experiments/results
+
+# 4. Run Training on 10 Cores
+python train.py \
+    --config configs/config.yaml \
+    --model proposed \
+    --synthetic \
+    --epochs 50 \
+    --batch_size 16 \
+    --lr 0.0001
+
+echo "Short queue CPU training completed at $(date)"
