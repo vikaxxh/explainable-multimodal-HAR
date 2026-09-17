@@ -4,31 +4,31 @@
 # ==============================================================================
 #PBS -N emit_train_gpu
 #PBS -q dgx
-#PBS -o experiments/logs/train_gpu.out
-#PBS -e experiments/logs/train_gpu.err
-#PBS -l select=1:ncpus=8:ngpus=1:mem=32gb
-#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -o train_gpu.log
 
-cd $PBS_O_WORKDIR
+cd "$PBS_O_WORKDIR" || cd "$HOME/explainable-multimodal-HAR"
 
 echo "=========================================================="
 echo "Starting Job: $PBS_JOBID on $(hostname) at $(date)"
+echo "Working Directory: $(pwd)"
 echo "=========================================================="
 
-# 1. Load MANIT Modules
-module purge 2>/dev/null || true
+# 1. Load MANIT CUDA module
 module load compilers/nvidia/cuda/11.6 2>/dev/null || true
-module load apps/anaconda-2024.02 2>/dev/null || module load apps/anaconda3 2>/dev/null || true
 
-# 2. Activate Conda Environment
-source $(dirname $(dirname $(which python3)))/etc/profile.d/conda.sh 2>/dev/null || true
-conda activate emit-har 2>/dev/null || source activate emit-har
+# 2. Use direct Python interpreter from emit-har environment
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+if [ ! -f "$PYTHON_BIN" ]; then
+    PYTHON_BIN="$(which python)"
+fi
+echo "Using Python binary: $PYTHON_BIN"
 
-# 3. Create log directory
+export PYTHONUNBUFFERED=1
 mkdir -p experiments/logs experiments/checkpoints experiments/results
 
-# 4. Run Training
-python train.py \
+# 3. Run Training
+$PYTHON_BIN train.py \
     --config configs/config.yaml \
     --model proposed \
     --synthetic \
