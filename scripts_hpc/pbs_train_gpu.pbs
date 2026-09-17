@@ -16,12 +16,13 @@ echo "Starting Job: $PBS_JOBID on $(hostname) at $(date)"
 echo "=========================================================="
 
 # 1. Load MANIT Modules
-module purge
-module load compilers/nvidia/cuda/12.2
-module load apps/anaconda-2024.02
+module purge 2>/dev/null || true
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+module load apps/anaconda-2024.02 2>/dev/null || module load apps/anaconda3 2>/dev/null || true
 
 # 2. Activate Conda Environment
-source activate emit-har || conda activate emit-har
+source $(dirname $(dirname $(which python3)))/etc/profile.d/conda.sh 2>/dev/null || true
+conda activate emit-har 2>/dev/null || source activate emit-har
 
 # 3. Create log directory
 mkdir -p experiments/logs experiments/checkpoints experiments/results
