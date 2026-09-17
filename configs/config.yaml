@@ -157,7 +157,7 @@ training:
   batch_size: 16
   num_workers: 4
   lr: 0.0001
-  min_lr: 1e-6
+  min_lr: 1.0e-6
   weight_decay: 0.0001
   warmup_epochs: 5
   grad_clip: 1.0

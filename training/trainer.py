@@ -48,11 +48,11 @@ class Trainer:
         self.augmentor = MultimodalAugmentor()
 
         cfg_train = config.get("training", {})
-        self.epochs = cfg_train.get("epochs", 50)
-        self.lr = cfg_train.get("lr", 1e-4)
-        self.weight_decay = cfg_train.get("weight_decay", 1e-4)
-        self.grad_clip = cfg_train.get("grad_clip", 1.0)
-        self.mixed_precision = cfg_train.get("mixed_precision", "fp16")
+        self.epochs = int(cfg_train.get("epochs", 50))
+        self.lr = float(cfg_train.get("lr", 1e-4))
+        self.weight_decay = float(cfg_train.get("weight_decay", 1e-4))
+        self.grad_clip = float(cfg_train.get("grad_clip", 1.0))
+        self.mixed_precision = str(cfg_train.get("mixed_precision", "fp16"))
         self.checkpoint_dir = config.get("project", {}).get("checkpoint_dir", "experiments/checkpoints")
 
         if self.rank == 0:
@@ -61,11 +61,11 @@ class Trainer:
         # Loss function
         loss_weights = cfg_train.get("loss_weights", {})
         self.criterion = MultiTaskBehaviorLoss(
-            lambda_ped=loss_weights.get("lambda_ped", 1.0),
-            lambda_micro=loss_weights.get("lambda_micro", 1.0),
-            lambda_inter=loss_weights.get("lambda_inter", 1.0),
-            lambda_align=loss_weights.get("lambda_align", 0.1),
-            lambda_xai=loss_weights.get("lambda_xai", 0.05),
+            lambda_ped=float(loss_weights.get("lambda_ped", 1.0)),
+            lambda_micro=float(loss_weights.get("lambda_micro", 1.0)),
+            lambda_inter=float(loss_weights.get("lambda_inter", 1.0)),
+            lambda_align=float(loss_weights.get("lambda_align", 0.1)),
+            lambda_xai=float(loss_weights.get("lambda_xai", 0.05)),
             use_focal_loss=True,
             gamma=2.0
         )
@@ -79,7 +79,7 @@ class Trainer:
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer,
             T_max=self.epochs,
-            eta_min=cfg_train.get("min_lr", 1e-6)
+            eta_min=float(cfg_train.get("min_lr", 1e-6))
         )
 
         # AMP Scaler
