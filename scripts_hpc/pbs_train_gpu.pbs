@@ -30,11 +30,16 @@ echo "Using Python binary: $PYTHON_BIN"
 export PYTHONUNBUFFERED=1
 mkdir -p experiments/logs experiments/checkpoints experiments/results
 
-# 3. Run Training
+# 3. Ensure multi-dataset processed sequences exist
+if [ ! -d "data/processed/train" ] || [ -z "$(ls -A data/processed/train/*.npz 2>/dev/null)" ]; then
+    echo "No processed sequences found. Generating unified multi-dataset sequences..."
+    $PYTHON_BIN preprocess_multidataset.py
+fi
+
+# 4. Run Real Multimodal Training
 $PYTHON_BIN train.py \
     --config configs/config.yaml \
     --model proposed \
-    --synthetic \
     --epochs 50 \
     --batch_size 16 \
     --lr 0.0001
