@@ -99,16 +99,22 @@ class MultiDatasetBuilder:
         }
 
         # 6. Save to disk as .npz records
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            def tqdm(iterable, desc=""):
+                return iterable
+
         summary_counts = {}
         for split_name, samples in splits.items():
             split_dir = os.path.join(self.output_dir, split_name)
             os.makedirs(split_dir, exist_ok=True)
             summary_counts[split_name] = len(samples)
 
-            for idx, sample in enumerate(samples):
+            for idx, sample in enumerate(tqdm(samples, desc=f"[Saving {split_name}]")):
                 file_name = f"seq_{idx:05d}.npz"
                 file_path = os.path.join(split_dir, file_name)
-                np.savez_compressed(
+                np.savez(
                     file_path,
                     rgb=sample["rgb"],
                     pose=sample["pose"],
