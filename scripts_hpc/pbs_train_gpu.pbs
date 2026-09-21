@@ -4,7 +4,7 @@
 # ==============================================================================
 #PBS -N emit_train_gpu
 #PBS -q dgx
-#PBS -l select=1:ncpus=10:ngpus=1:mem=16gb
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
 #PBS -l place=free
 #PBS -l walltime=24:00:00
 #PBS -j oe
