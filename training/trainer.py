@@ -84,7 +84,10 @@ class Trainer:
 
         # AMP Scaler
         use_amp = (self.mixed_precision == "fp16" and device.type == "cuda")
-        self.scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+        try:
+            self.scaler = torch.amp.GradScaler('cuda', enabled=use_amp)
+        except (AttributeError, TypeError):
+            self.scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
         self.best_val_loss = float("inf")
         self.start_epoch = 0
@@ -104,7 +107,13 @@ class Trainer:
 
             self.optimizer.zero_grad()
 
-            with torch.cuda.amp.autocast(enabled=(self.mixed_precision in ["fp16", "bf16"] and self.device.type == "cuda")):
+            amp_enabled = (self.mixed_precision in ["fp16", "bf16"] and self.device.type == "cuda")
+            try:
+                autocast_ctx = torch.amp.autocast('cuda', enabled=amp_enabled)
+            except (AttributeError, TypeError):
+                autocast_ctx = torch.cuda.amp.autocast(enabled=amp_enabled)
+
+            with autocast_ctx:
                 outputs = self.model(batch)
                 loss_dict = self.criterion(outputs, batch)
                 loss = loss_dict["loss_total"]
@@ -136,9 +145,15 @@ class Trainer:
         correct_ped = 0
         total_ped = 0
 
+        amp_enabled = (self.mixed_precision in ["fp16", "bf16"] and self.device.type == "cuda")
+        try:
+            autocast_ctx = torch.amp.autocast('cuda', enabled=amp_enabled)
+        except (AttributeError, TypeError):
+            autocast_ctx = torch.cuda.amp.autocast(enabled=amp_enabled)
+
         for batch in self.val_loader:
             batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-            with torch.cuda.amp.autocast(enabled=(self.mixed_precision in ["fp16", "bf16"] and self.device.type == "cuda")):
+            with autocast_ctx:
                 outputs = self.model(batch)
                 loss_dict = self.criterion(outputs, batch)
                 loss = loss_dict["loss_total"]
