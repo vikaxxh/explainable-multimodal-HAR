@@ -9,7 +9,10 @@
 #PBS -j oe
 #PBS -o train_short.log
 
-cd "$PBS_O_WORKDIR" || cd "$HOME/explainable-multimodal-HAR"
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/train_short.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================================="
 echo "Starting Fast CPU Job: $PBS_JOBID on $(hostname) at $(date)"
