@@ -65,8 +65,75 @@ class JAADAdapter:
                 with open(annotation_path, "r") as f:
                     return json.load(f)
 
+        # Check for official JAAD XML annotations folder
+        xml_dir = os.path.join(self.jaad_root, "annotations")
+        if os.path.isdir(xml_dir):
+            import glob
+            xml_files = sorted(glob.glob(os.path.join(xml_dir, "*.xml")))
+            if xml_files:
+                print(f"[JAADAdapter] Found {len(xml_files)} official JAAD XML annotation files in {xml_dir}. Parsing...")
+                return self._parse_jaad_xml_dir(xml_files)
+
         print("[JAADAdapter] No local JAAD file found. Providing mock/synthetic loader interface.")
         return self._generate_mock_jaad_structure()
+
+    def _parse_jaad_xml_dir(self, xml_files: List[str]) -> Dict[str, Any]:
+        """Parses official JAAD XML annotation files into standard schema."""
+        import xml.etree.ElementTree as ET
+        jaad_data = {}
+        for xf in xml_files:
+            video_id = os.path.splitext(os.path.basename(xf))[0]
+            try:
+                tree = ET.parse(xf)
+                root = tree.getroot()
+                ped_tracks = {}
+                for track in root.findall(".//track"):
+                    label = track.get("label", "")
+                    if label != "pedestrian":
+                        continue
+                    ped_id = track.get("id", f"ped_{len(ped_tracks)+1}")
+                    boxes = []
+                    frames = []
+                    cross_flags = []
+                    actions = []
+                    for box in track.findall("box"):
+                        if box.get("outside", "0") == "1":
+                            continue
+                        f_idx = int(box.get("frame", 0))
+                        xtl = float(box.get("xtl", 0))
+                        ytl = float(box.get("ytl", 0))
+                        xbr = float(box.get("xbr", 0))
+                        ybr = float(box.get("ybr", 0))
+                        w = max(1.0, xbr - xtl)
+                        h = max(1.0, ybr - ytl)
+                        boxes.append([xtl, ytl, w, h])
+                        frames.append(f_idx)
+
+                        cross_val = 0
+                        action_val = 1
+                        for attr in box.findall("attribute"):
+                            attr_name = attr.get("name", "").lower()
+                            attr_text = (attr.text or "").strip().lower()
+                            if "cross" in attr_name:
+                                cross_val = 1 if attr_text in ["1", "true", "yes", "crossing"] else 0
+                            if "action" in attr_name:
+                                action_val = 1 if "walk" in attr_text else 0
+                        cross_flags.append(cross_val)
+                        actions.append(action_val)
+
+                    if len(boxes) >= self.window_size:
+                        ped_tracks[ped_id] = {
+                            "bbox": boxes,
+                            "frames": frames,
+                            "actions": actions,
+                            "cross": cross_flags
+                        }
+                if ped_tracks:
+                    jaad_data[video_id] = {"ped_annotations": ped_tracks}
+            except Exception as e:
+                continue
+        print(f"[JAADAdapter] Successfully loaded real tracks from {len(jaad_data)} JAAD videos.")
+        return jaad_data
 
     def _generate_mock_jaad_structure(self) -> Dict[str, Any]:
         """Generates realistic mock JAAD annotations matching official schema."""
