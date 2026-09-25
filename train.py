@@ -169,7 +169,7 @@ def main():
     )
 
     if args.resume:
-        trainer.load_checkpoint(args.resume)
+        trainer.load_checkpoint(args.resume, override_lr=args.lr)
 
     # Fit Model
     trainer.fit()

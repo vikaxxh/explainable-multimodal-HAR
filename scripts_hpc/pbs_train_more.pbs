@@ -1,0 +1,72 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Extended Real Multimodal Training on MANIT HPC (PBS Pro / DGX)
+# Scales real data extraction and extends training up to 100 epochs
+# ==============================================================================
+#PBS -N emit_train_more
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -o train_more.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/train_more.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "Starting Extended Training Job: $PBS_JOBID on $(hostname) at $(date)"
+echo "Working Directory: $(pwd)"
+echo "=========================================================="
+
+# 1. Load MANIT CUDA module
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+
+# 2. Use direct Python interpreter from emit-har environment
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+if [ ! -f "$PYTHON_BIN" ]; then
+    PYTHON_BIN="$(which python)"
+fi
+echo "Using Python binary: $PYTHON_BIN"
+
+# Verify Python & GPU availability
+$PYTHON_BIN -c "import torch; print(f'PyTorch: {torch.__version__} | CUDA available: {torch.cuda.is_available()} | Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"None\"}')"
+
+export PYTHONUNBUFFERED=1
+mkdir -p experiments/logs experiments/checkpoints experiments/results
+
+# 3. Scale Up Real Multimodal Sequences (unlimited tracks from PIE + JAAD)
+echo ""
+echo ">>> Ingesting full real dataset sequences (PIE + JAAD + TITAN)..."
+$PYTHON_BIN preprocess_multidataset.py \
+    --max_pie_samples 0 \
+    --max_jaad_samples 0 \
+    --max_titan_samples 1000 \
+    --clean
+
+echo "Total processed sequences in data/processed/train: $(ls -1 data/processed/train/*.npz 2>/dev/null | wc -l)"
+echo "Total processed sequences in data/processed/val:   $(ls -1 data/processed/val/*.npz 2>/dev/null | wc -l)"
+echo "Total processed sequences in data/processed/test:  $(ls -1 data/processed/test/*.npz 2>/dev/null | wc -l)"
+
+# 4. Extended Training (Resume from best checkpoint to 100 epochs, or start fresh)
+RESUME_CKPT="experiments/checkpoints/checkpoint_best.pt"
+RESUME_FLAG=""
+if [ -f "$RESUME_CKPT" ]; then
+    echo "Found best checkpoint ($RESUME_CKPT). Resuming and extending to 100 epochs with fine-tuning LR..."
+    RESUME_FLAG="--resume $RESUME_CKPT"
+else
+    echo "Starting full 100-epoch training from scratch..."
+fi
+
+$PYTHON_BIN train.py \
+    --config configs/config.yaml \
+    --model proposed \
+    --epochs 100 \
+    --batch_size 16 \
+    --lr 0.00005 \
+    $RESUME_FLAG
+
+echo ""
+echo "Extended training job finished successfully at $(date)"

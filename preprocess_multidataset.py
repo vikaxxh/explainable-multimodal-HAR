@@ -27,10 +27,11 @@ def parse_args():
     parser.add_argument("--microvision_dir", type=str, default="data/raw/MicroVision", help="Path to MicroVision dataset")
     parser.add_argument("--output_dir", type=str, default="data/processed", help="Output directory for processed .npz sequences")
     parser.add_argument("--evaluate_microvision", action="store_true", help="Run MicroVision suitability assessment")
-    parser.add_argument("--max_pie_samples", type=int, default=2000, help="Max PIE sequences to generate")
-    parser.add_argument("--max_jaad_samples", type=int, default=2500, help="Max JAAD sequences to generate")
-    parser.add_argument("--max_titan_samples", type=int, default=500, help="Max TITAN sequences to generate")
-    parser.add_argument("--max_micro_samples", type=int, default=300, help="Max MicroVision sequences to generate")
+    parser.add_argument("--max_pie_samples", type=int, default=5000, help="Max PIE sequences to generate (0 for unlimited)")
+    parser.add_argument("--max_jaad_samples", type=int, default=5000, help="Max JAAD sequences to generate (0 for unlimited)")
+    parser.add_argument("--max_titan_samples", type=int, default=1000, help="Max TITAN sequences to generate (0 for unlimited)")
+    parser.add_argument("--max_micro_samples", type=int, default=500, help="Max MicroVision sequences to generate (0 for unlimited)")
+    parser.add_argument("--clean", action="store_true", help="Remove existing .npz sequences before building")
     return parser.parse_args()
 
 
@@ -61,7 +62,8 @@ def main():
         max_pie_samples=args.max_pie_samples,
         max_jaad_samples=args.max_jaad_samples,
         max_titan_samples=args.max_titan_samples,
-        max_micro_samples=args.max_micro_samples
+        max_micro_samples=args.max_micro_samples,
+        clean_existing=args.clean
     )
 
 

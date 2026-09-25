@@ -190,7 +190,7 @@ class Trainer:
             torch.save(checkpoint, best_path)
             print(f"[Trainer] Epoch {epoch}: Saved new best model checkpoint to {best_path}")
 
-    def load_checkpoint(self, checkpoint_path: str):
+    def load_checkpoint(self, checkpoint_path: str, override_lr: Optional[float] = None):
         if not os.path.exists(checkpoint_path):
             print(f"[Trainer] Checkpoint {checkpoint_path} not found. Starting from scratch.")
             return
@@ -202,10 +202,28 @@ class Trainer:
             self.model.load_state_dict(checkpoint["model_state_dict"])
 
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         self.start_epoch = checkpoint["epoch"] + 1
         self.best_val_loss = checkpoint.get("best_val_loss", float("inf"))
-        print(f"[Trainer] Resumed checkpoint from {checkpoint_path} at epoch {self.start_epoch}")
+
+        if override_lr is not None:
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = override_lr
+            self.lr = override_lr
+
+        # If user extends the epoch count beyond the checkpoint, re-align the scheduler for remaining epochs
+        if self.epochs > self.start_epoch:
+            remaining_epochs = self.epochs - self.start_epoch
+            min_lr = float(self.config.get("training", {}).get("min_lr", 1e-6))
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                self.optimizer,
+                T_max=remaining_epochs,
+                eta_min=min_lr
+            )
+            print(f"[Trainer] Resumed checkpoint from {checkpoint_path} at epoch {self.start_epoch}/{self.epochs}")
+            print(f"[Trainer] Scheduler re-aligned with {remaining_epochs} remaining epochs (LR: {self.optimizer.param_groups[0]['lr']})")
+        else:
+            self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            print(f"[Trainer] Resumed checkpoint from {checkpoint_path} at epoch {self.start_epoch}")
 
     def fit(self):
         """Runs complete training and validation cycle across epochs."""

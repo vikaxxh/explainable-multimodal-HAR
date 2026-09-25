@@ -42,47 +42,64 @@ class MultiDatasetBuilder:
         jaad_dir: Optional[str] = None,
         titan_dir: Optional[str] = None,
         microvision_dir: Optional[str] = None,
-        max_pie_samples: int = 200,
-        max_jaad_samples: int = 200,
-        max_titan_samples: int = 150,
-        max_micro_samples: int = 100
+        max_pie_samples: int = 5000,
+        max_jaad_samples: int = 5000,
+        max_titan_samples: int = 1000,
+        max_micro_samples: int = 500,
+        clean_existing: bool = False
     ) -> Dict[str, int]:
         """
         Extracts samples from all configured datasets, merges them, and saves to disk.
+        Set max_*_samples <= 0 for unlimited (extract all available tracks).
         """
+        import glob
+        if clean_existing:
+            print(f"[MultiDataset] Cleaning existing .npz files in {self.output_dir}...")
+            for s in ["train", "val", "test"]:
+                sdir = os.path.join(self.output_dir, s)
+                if os.path.isdir(sdir):
+                    for f in glob.glob(os.path.join(sdir, "*.npz")):
+                        try:
+                            os.remove(f)
+                        except OSError:
+                            pass
+
         all_samples: List[Dict[str, Any]] = []
 
         # 1. Ingest PIE (Pedestrians + Bicycles)
         print("\n[MultiDataset] --- Ingesting PIE Dataset ---")
         pie_adapter = PIEAdapter(pie_root=pie_dir or "data/raw/PIE")
         pie_raw = pie_adapter.load_annotations()
-        pie_samples = pie_adapter.extract_sequences_from_annotations(pie_raw, max_samples=max_pie_samples)
+        pie_lim = None if max_pie_samples <= 0 else max_pie_samples
+        pie_samples = pie_adapter.extract_sequences_from_annotations(pie_raw, max_samples=pie_lim)
         print(f"[MultiDataset] Extracted {len(pie_samples)} sequences from PIE.")
         all_samples.extend(pie_samples)
 
         # 2. Ingest JAAD (Pedestrian Companion Dataset)
-        if jaad_dir or max_jaad_samples > 0:
-            print("\n[MultiDataset] --- Ingesting JAAD Dataset ---")
-            jaad_adapter = JAADAdapter(jaad_root=jaad_dir or "data/raw/JAAD")
-            jaad_raw = jaad_adapter.load_annotations()
-            jaad_samples = jaad_adapter.extract_sequences_from_annotations(jaad_raw, max_samples=max_jaad_samples)
-            print(f"[MultiDataset] Extracted {len(jaad_samples)} sequences from JAAD.")
-            all_samples.extend(jaad_samples)
+        print("\n[MultiDataset] --- Ingesting JAAD Dataset ---")
+        jaad_adapter = JAADAdapter(jaad_root=jaad_dir or "data/raw/JAAD")
+        jaad_raw = jaad_adapter.load_annotations()
+        jaad_lim = None if max_jaad_samples <= 0 else max_jaad_samples
+        jaad_samples = jaad_adapter.extract_sequences_from_annotations(jaad_raw, max_samples=jaad_lim)
+        print(f"[MultiDataset] Extracted {len(jaad_samples)} sequences from JAAD.")
+        all_samples.extend(jaad_samples)
 
         # 3. Ingest TITAN (Honda Research Complex Interactions)
-        if titan_dir or max_titan_samples > 0:
+        if titan_dir or max_titan_samples != 0:
             print("\n[MultiDataset] --- Ingesting Honda TITAN Dataset ---")
             titan_adapter = TITANAdapter(titan_root=titan_dir or "data/raw/TITAN")
             titan_raw = titan_adapter.load_annotations()
-            titan_samples = titan_adapter.extract_sequences(titan_raw, max_samples=max_titan_samples)
+            titan_lim = None if max_titan_samples <= 0 else max_titan_samples
+            titan_samples = titan_adapter.extract_sequences(titan_raw, max_samples=titan_lim)
             print(f"[MultiDataset] Extracted {len(titan_samples)} sequences from TITAN.")
             all_samples.extend(titan_samples)
 
         # 4. Ingest MicroVision (E-scooter Dynamics)
-        if microvision_dir or max_micro_samples > 0:
+        if microvision_dir or max_micro_samples != 0:
             print("\n[MultiDataset] --- Ingesting MicroVision Dataset ---")
             micro_adapter = MicroVisionAdapter(data_root=microvision_dir or "data/raw/MicroVision")
-            micro_samples = micro_adapter.extract_scooter_sequences(max_samples=max_micro_samples)
+            micro_lim = None if max_micro_samples <= 0 else max_micro_samples
+            micro_samples = micro_adapter.extract_scooter_sequences(max_samples=micro_lim)
             print(f"[MultiDataset] Extracted {len(micro_samples)} sequences from MicroVision.")
             all_samples.extend(micro_samples)
 
