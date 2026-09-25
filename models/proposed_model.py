@@ -149,9 +149,9 @@ class ProposedXMISTModel(nn.Module):
         z, temporal_attn = self.temporal_transformer(f_fused)
 
         # 6. Multi-task Heads
-        ped_logits = self.ped_head(z)
-        micro_logits = self.micro_head(z)
-        inter_logits = self.inter_head(z)
+        ped_logits = torch.nan_to_num(self.ped_head(z), nan=0.0)
+        micro_logits = torch.nan_to_num(self.micro_head(z), nan=0.0)
+        inter_logits = torch.nan_to_num(self.inter_head(z), nan=0.0)
 
         return {
             # Predictions
@@ -160,9 +160,9 @@ class ProposedXMISTModel(nn.Module):
             "inter_logits": inter_logits,
             "latent_z": z,
             # XAI Attribution Artifacts (Phases 20-22)
-            "temporal_attn": temporal_attn,             # (B, T, T) Temporal Evidence
-            "modality_weights": modality_weights,       # (B, T, 4) Modality Evidence
-            "interaction_weights": interaction_weights, # (B, T, N) Interaction Evidence
+            "temporal_attn": torch.nan_to_num(temporal_attn, nan=0.0),
+            "modality_weights": torch.nan_to_num(modality_weights, nan=0.25) if modality_weights is not None else None,
+            "interaction_weights": torch.nan_to_num(interaction_weights, nan=0.0) if interaction_weights is not None else None,
             "cross_attn_maps": cross_attn_maps,         # Cross-modal Evidence
             "f_multi": f_multi,
             "f_interaction": f_interaction

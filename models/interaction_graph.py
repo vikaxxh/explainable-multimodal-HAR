@@ -88,6 +88,7 @@ class DynamicInteractionGraph(nn.Module):
 
         # Combined edge features
         edge_feats = torch.cat([dist, delta_v, delta_theta, ttc], dim=-1) # (B, T, N, 4)
+        edge_feats = torch.nan_to_num(edge_feats, nan=0.0, posinf=10.0, neginf=0.0)
 
         # Connectivity mask: must be within threshold and marked active in neighbor_mask
         adj_mask = (dist.squeeze(-1) <= self.distance_threshold) & neighbor_mask

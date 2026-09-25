@@ -38,8 +38,17 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     # 1. Load sample sequence
-    dataset = SyntheticMultimodalDataset(num_samples=16, window_size=config["data"]["window_size"])
-    batch = collate_multimodal_batch([dataset[args.sample_idx]])
+    test_dir = os.path.join(config["project"].get("data_dir", "data/processed"), "test")
+    if os.path.exists(test_dir):
+        from datasets.multimodal_dataset import MultimodalSequenceDataset
+        dataset = MultimodalSequenceDataset(data_dir=config["project"].get("data_dir", "data/processed"), split="test")
+        print(f"[XAI] Loaded sample #{args.sample_idx} from real test sequences ({len(dataset)} available).")
+    else:
+        dataset = SyntheticMultimodalDataset(num_samples=16, window_size=config["data"]["window_size"])
+        print(f"[XAI] Using synthetic sample #{args.sample_idx}.")
+
+    sample_to_use = dataset[min(args.sample_idx, len(dataset) - 1)]
+    batch = collate_multimodal_batch([sample_to_use])
     batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
     # 2. Load Model

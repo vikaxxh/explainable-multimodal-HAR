@@ -129,11 +129,14 @@ class DynamicInteractionTransformer(nn.Module):
                 key_padding_mask=key_padding_mask,
                 need_weights=True
             )
+            attn_out = torch.nan_to_num(attn_out, nan=0.0)
+            attn_w = torch.nan_to_num(attn_w, nan=0.0)
             last_attn_weights = attn_w  # (B*T, 1, N)
             h = layer["norm1"](h + attn_out)
             h = layer["norm2"](h + layer["ffn"](h))
 
         f_interaction = h.view(B, T, self.feature_dim)  # (B, T, d)
+        f_interaction = torch.nan_to_num(f_interaction, nan=0.0)
         interaction_weights = last_attn_weights.view(B, T, N) # (B, T, N)
 
         # Fuse F_{multi} and F_{interaction} (Phase 17)
@@ -141,5 +144,6 @@ class DynamicInteractionTransformer(nn.Module):
         alpha = self.fusion_gate(concat_rep)
         f_final = alpha * f_multi + (1.0 - alpha) * f_interaction
         f_final = self.fusion_projector(concat_rep)
+        f_final = torch.nan_to_num(f_final, nan=0.0)
 
         return f_final, f_interaction, interaction_weights
