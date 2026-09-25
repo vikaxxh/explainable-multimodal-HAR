@@ -75,8 +75,92 @@ class PIEAdapter:
                 with open(annotation_path, "r") as f:
                     return json.load(f)
 
+        # Check for official PIE XML annotations directory
+        xml_dir = os.path.join(self.pie_root, "annotations")
+        if os.path.isdir(xml_dir):
+            import glob
+            xml_files = sorted(glob.glob(os.path.join(xml_dir, "**", "*.xml"), recursive=True) + glob.glob(os.path.join(xml_dir, "*.xml")))
+            if xml_files:
+                print(f"[PIEAdapter] Found {len(xml_files)} official PIE XML annotation files in {xml_dir}. Parsing...")
+                return self._parse_pie_xml_files(xml_files)
+
         print("[PIEAdapter] No local PIE annotation file found. Providing mock/synthetic loader interface.")
         return self._generate_mock_pie_structure()
+
+    def _parse_pie_xml_files(self, xml_files: List[str]) -> Dict[str, Any]:
+        """Parses official PIE XML annotation files across all sets."""
+        import xml.etree.ElementTree as ET
+        pie_data = {}
+        for xf in xml_files:
+            # e.g. path/to/annotations/set01/video_0001_annot.xml
+            rel_parts = os.path.normpath(xf).split(os.sep)
+            set_id = "set01"
+            for p in rel_parts:
+                if p.startswith("set"):
+                    set_id = p
+                    break
+            video_id = os.path.splitext(os.path.basename(xf))[0].replace("_annot", "")
+
+            if set_id not in pie_data:
+                pie_data[set_id] = {}
+
+            try:
+                tree = ET.parse(xf)
+                root = tree.getroot()
+                ped_tracks = {}
+                bike_tracks = {}
+
+                for track in root.findall(".//track"):
+                    label = track.get("label", "").lower()
+                    track_id = track.get("id", "")
+                    boxes, frames, cross_flags, actions = [], [], [], []
+
+                    for box in track.findall("box"):
+                        if box.get("outside", "0") == "1":
+                            continue
+                        f_idx = int(box.get("frame", 0))
+                        xtl = float(box.get("xtl", 0))
+                        ytl = float(box.get("ytl", 0))
+                        xbr = float(box.get("xbr", 0))
+                        ybr = float(box.get("ybr", 0))
+                        w = max(1.0, xbr - xtl)
+                        h = max(1.0, ybr - ytl)
+                        boxes.append([xtl, ytl, w, h])
+                        frames.append(f_idx)
+
+                        cross_val = 0
+                        action_val = 1
+                        for attr in box.findall("attribute"):
+                            aname = attr.get("name", "").lower()
+                            atext = (attr.text or "").strip().lower()
+                            if "cross" in aname:
+                                cross_val = 1 if atext in ["1", "true", "yes", "crossing"] else 0
+                            if "action" in aname:
+                                action_val = 1 if "walk" in atext else 0
+                        cross_flags.append(cross_val)
+                        actions.append(action_val)
+
+                    if len(boxes) >= self.window_size:
+                        if label == "pedestrian":
+                            ped_tracks[track_id or f"ped_{len(ped_tracks)+1}"] = {
+                                "bbox": boxes, "frames": frames, "actions": actions, "cross": cross_flags
+                            }
+                        elif label in ["bicycle", "bicyclist", "bike"]:
+                            bike_tracks[track_id or f"bike_{len(bike_tracks)+1}"] = {
+                                "bbox": boxes, "frames": frames, "type": "bicycle"
+                            }
+
+                if ped_tracks or bike_tracks:
+                    pie_data[set_id][video_id] = {
+                        "ped_annotations": ped_tracks,
+                        "vehicle_annotations": bike_tracks
+                    }
+            except Exception:
+                continue
+
+        total_vids = sum(len(v) for v in pie_data.values())
+        print(f"[PIEAdapter] Successfully loaded real tracks from {total_vids} PIE videos across {len(pie_data)} sets.")
+        return pie_data
 
     def _generate_mock_pie_structure(self) -> Dict[str, Any]:
         """
