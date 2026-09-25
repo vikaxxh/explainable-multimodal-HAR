@@ -1,0 +1,69 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Evaluation, Robustness & XAI Generation on MANIT HPC (PBS Pro)
+# ==============================================================================
+#PBS -N emit_eval_xai
+#PBS -q dgx
+#PBS -l select=1:ncpus=4:ngpus=1:mem=16gb
+#PBS -l place=free
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -o eval_and_xai.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/eval_and_xai.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "Starting Evaluation & XAI Job: $PBS_JOBID on $(hostname) at $(date)"
+echo "Working Directory: $(pwd)"
+echo "=========================================================="
+
+# 1. Load MANIT CUDA module
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+
+# 2. Use direct Python interpreter from emit-har environment
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+if [ ! -f "$PYTHON_BIN" ]; then
+    PYTHON_BIN="$(which python)"
+fi
+echo "Using Python binary: $PYTHON_BIN"
+
+CHECKPOINT="experiments/checkpoints/checkpoint_best.pt"
+if [ ! -f "$CHECKPOINT" ]; then
+    echo "Warning: $CHECKPOINT not found! Checking checkpoint_latest.pt..."
+    CHECKPOINT="experiments/checkpoints/checkpoint_latest.pt"
+fi
+
+echo "Evaluating Checkpoint: $CHECKPOINT"
+
+# 3. Standard Test Set Evaluation (Classification Metrics)
+echo ""
+echo ">>> [1/3] Running Full Test Set Evaluation..."
+$PYTHON_BIN evaluate.py \
+    --config configs/config.yaml \
+    --checkpoint "$CHECKPOINT" \
+    --model_type proposed
+
+# 4. Robustness Stress-Testing (Sensor drop & missing modalities)
+echo ""
+echo ">>> [2/3] Running Robustness & Missing Modality Stress Tests..."
+$PYTHON_BIN evaluate.py \
+    --config configs/config.yaml \
+    --checkpoint "$CHECKPOINT" \
+    --model_type proposed \
+    --robustness
+
+# 5. XAI Human-Readable Report & Faithfulness Verification
+echo ""
+echo ">>> [3/3] Generating XAI Explanation & Faithfulness Verification..."
+$PYTHON_BIN explain.py \
+    --config configs/config.yaml \
+    --checkpoint "$CHECKPOINT" \
+    --sample_idx 0 \
+    --faithfulness \
+    --visualize
+
+echo ""
+echo "All evaluations and XAI reports completed successfully at $(date)"
