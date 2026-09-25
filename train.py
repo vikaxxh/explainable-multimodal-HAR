@@ -100,6 +100,11 @@ def main():
     if args.lr is not None:
         config["training"]["lr"] = args.lr
 
+    # Dedicated checkpoint directory per model variant
+    if args.model != "proposed":
+        config["project"]["checkpoint_dir"] = os.path.join("experiments/checkpoints", args.model)
+        os.makedirs(config["project"]["checkpoint_dir"], exist_ok=True)
+
     # Distributed setup
     is_distributed = args.distributed or "RANK" in os.environ
     if is_distributed:
