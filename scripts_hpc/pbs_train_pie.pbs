@@ -1,0 +1,71 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Train Proposed X-MIST Model on PIE Dataset Only (DGX GPU)
+# ==============================================================================
+#PBS -N emit_train_pie
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -o train_pie.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/train_pie.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "Starting PIE-Only Training Job: $PBS_JOBID on $(hostname) at $(date)"
+echo "Working Directory: $(pwd)"
+echo "=========================================================="
+
+# 1. Load MANIT CUDA module
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+
+# 2. Use direct Python interpreter from emit-har environment
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+if [ ! -f "$PYTHON_BIN" ]; then
+    PYTHON_BIN="$(which python)"
+fi
+echo "Using Python binary: $PYTHON_BIN"
+
+# Verify Python & GPU availability
+$PYTHON_BIN -c "import torch; print(f'PyTorch: {torch.__version__} | CUDA available: {torch.cuda.is_available()} | Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"None\"}')"
+
+export PYTHONUNBUFFERED=1
+mkdir -p experiments/logs experiments/checkpoints/pie experiments/results
+
+# 3. Ensure official PIE annotations exist; if not, download them (~25 MB)
+if [ ! -d "data/raw/PIE/annotations" ] || [ -z "$(ls -A data/raw/PIE/annotations/*.xml 2>/dev/null)" ]; then
+    echo "Downloading and unpacking official PIE annotations..."
+    bash scripts_hpc/setup_pie_annotations.sh
+fi
+
+# 4. Generate PIE-only processed sequences
+if [ ! -d "data/processed_pie/train" ] || [ -z "$(ls -A data/processed_pie/train/*.npz 2>/dev/null)" ]; then
+    echo "Generating PIE-only processed sequences..."
+    $PYTHON_BIN preprocess_multidataset.py \
+        --max_jaad_samples -1 \
+        --max_pie_samples 0 \
+        --max_titan_samples -1 \
+        --max_micro_samples -1 \
+        --output_dir data/processed_pie \
+        --stride 4 \
+        --clean
+fi
+
+echo "Sequence count in data/processed_pie/train: $(ls -1 data/processed_pie/train/*.npz 2>/dev/null | wc -l)"
+
+# 5. Run PIE Training
+echo "Starting PIE-only model training..."
+$PYTHON_BIN train.py \
+    --config configs/config.yaml \
+    --model proposed \
+    --data_dir data/processed_pie \
+    --checkpoint_dir experiments/checkpoints/pie \
+    --epochs 50 \
+    --batch_size 16 \
+    --lr 0.0001
+
+echo "PIE-only training completed successfully at $(date)"

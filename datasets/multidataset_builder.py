@@ -69,25 +69,27 @@ class MultiDatasetBuilder:
         all_samples: List[Dict[str, Any]] = []
 
         # 1. Ingest PIE (Pedestrians + Bicycles)
-        print("\n[MultiDataset] --- Ingesting PIE Dataset ---")
-        pie_adapter = PIEAdapter(pie_root=pie_dir or "data/raw/PIE", stride=stride)
-        pie_raw = pie_adapter.load_annotations()
-        pie_lim = None if max_pie_samples <= 0 else max_pie_samples
-        pie_samples = pie_adapter.extract_sequences_from_annotations(pie_raw, max_samples=pie_lim)
-        print(f"[MultiDataset] Extracted {len(pie_samples)} sequences from PIE.")
-        all_samples.extend(pie_samples)
+        if max_pie_samples != -1:
+            print("\n[MultiDataset] --- Ingesting PIE Dataset ---")
+            pie_adapter = PIEAdapter(pie_root=pie_dir or "data/raw/PIE", stride=stride)
+            pie_raw = pie_adapter.load_annotations()
+            pie_lim = None if max_pie_samples <= 0 else max_pie_samples
+            pie_samples = pie_adapter.extract_sequences_from_annotations(pie_raw, max_samples=pie_lim)
+            print(f"[MultiDataset] Extracted {len(pie_samples)} sequences from PIE.")
+            all_samples.extend(pie_samples)
 
         # 2. Ingest JAAD (Pedestrian Companion Dataset)
-        print(f"\n[MultiDataset] --- Ingesting JAAD Dataset (stride={stride}) ---")
-        jaad_adapter = JAADAdapter(jaad_root=jaad_dir or "data/raw/JAAD", stride=stride)
-        jaad_raw = jaad_adapter.load_annotations()
-        jaad_lim = None if max_jaad_samples <= 0 else max_jaad_samples
-        jaad_samples = jaad_adapter.extract_sequences_from_annotations(jaad_raw, max_samples=jaad_lim)
-        print(f"[MultiDataset] Extracted {len(jaad_samples)} sequences from JAAD.")
-        all_samples.extend(jaad_samples)
+        if max_jaad_samples != -1:
+            print(f"\n[MultiDataset] --- Ingesting JAAD Dataset (stride={stride}) ---")
+            jaad_adapter = JAADAdapter(jaad_root=jaad_dir or "data/raw/JAAD", stride=stride)
+            jaad_raw = jaad_adapter.load_annotations()
+            jaad_lim = None if max_jaad_samples <= 0 else max_jaad_samples
+            jaad_samples = jaad_adapter.extract_sequences_from_annotations(jaad_raw, max_samples=jaad_lim)
+            print(f"[MultiDataset] Extracted {len(jaad_samples)} sequences from JAAD.")
+            all_samples.extend(jaad_samples)
 
         # 3. Ingest TITAN (Honda Research Complex Interactions)
-        if titan_dir or max_titan_samples != 0:
+        if (titan_dir or max_titan_samples != 0) and max_titan_samples != -1:
             print("\n[MultiDataset] --- Ingesting Honda TITAN Dataset ---")
             titan_adapter = TITANAdapter(titan_root=titan_dir or "data/raw/TITAN")
             titan_raw = titan_adapter.load_annotations()
@@ -97,7 +99,7 @@ class MultiDatasetBuilder:
             all_samples.extend(titan_samples)
 
         # 4. Ingest MicroVision (E-scooter Dynamics)
-        if microvision_dir or max_micro_samples != 0:
+        if (microvision_dir or max_micro_samples != 0) and max_micro_samples != -1:
             print("\n[MultiDataset] --- Ingesting MicroVision Dataset ---")
             micro_adapter = MicroVisionAdapter(data_root=microvision_dir or "data/raw/MicroVision")
             micro_lim = None if max_micro_samples <= 0 else max_micro_samples

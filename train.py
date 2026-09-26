@@ -47,6 +47,7 @@ def parse_args():
     parser.add_argument("--lr", type=float, default=None, help="Learning rate")
     parser.add_argument("--synthetic", action="store_true", help="Force synthetic data for fast HPC smoke testing")
     parser.add_argument("--distributed", action="store_true", help="Enable multi-GPU DistributedDataParallel")
+    parser.add_argument("--checkpoint_dir", type=str, default=None, help="Custom checkpoint save directory")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume")
     parser.add_argument("--local_rank", type=int, default=-1, help="Local rank for torchrun DDP")
     return parser.parse_args()
@@ -100,8 +101,11 @@ def main():
     if args.lr is not None:
         config["training"]["lr"] = args.lr
 
-    # Dedicated checkpoint directory per model variant
-    if args.model != "proposed":
+    # Dedicated checkpoint directory per model variant or dataset
+    if args.checkpoint_dir is not None:
+        config["project"]["checkpoint_dir"] = args.checkpoint_dir
+        os.makedirs(args.checkpoint_dir, exist_ok=True)
+    elif args.model != "proposed":
         config["project"]["checkpoint_dir"] = os.path.join("experiments/checkpoints", args.model)
         os.makedirs(config["project"]["checkpoint_dir"], exist_ok=True)
 
