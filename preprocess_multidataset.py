@@ -31,6 +31,7 @@ def parse_args():
     parser.add_argument("--max_jaad_samples", type=int, default=5000, help="Max JAAD sequences to generate (0 for unlimited)")
     parser.add_argument("--max_titan_samples", type=int, default=1000, help="Max TITAN sequences to generate (0 for unlimited)")
     parser.add_argument("--max_micro_samples", type=int, default=500, help="Max MicroVision sequences to generate (0 for unlimited)")
+    parser.add_argument("--stride", type=int, default=8, help="Sliding window stride (default 8, dense 4)")
     parser.add_argument("--clean", action="store_true", help="Remove existing .npz sequences before building")
     return parser.parse_args()
 
@@ -63,6 +64,7 @@ def main():
         max_jaad_samples=args.max_jaad_samples,
         max_titan_samples=args.max_titan_samples,
         max_micro_samples=args.max_micro_samples,
+        stride=args.stride,
         clean_existing=args.clean
     )
 

@@ -46,11 +46,13 @@ class MultiDatasetBuilder:
         max_jaad_samples: int = 5000,
         max_titan_samples: int = 1000,
         max_micro_samples: int = 500,
+        stride: int = 8,
         clean_existing: bool = False
     ) -> Dict[str, int]:
         """
         Extracts samples from all configured datasets, merges them, and saves to disk.
         Set max_*_samples <= 0 for unlimited (extract all available tracks).
+        Use stride=4 for dense stride or stride=8 for standard stride.
         """
         import glob
         if clean_existing:
@@ -68,7 +70,7 @@ class MultiDatasetBuilder:
 
         # 1. Ingest PIE (Pedestrians + Bicycles)
         print("\n[MultiDataset] --- Ingesting PIE Dataset ---")
-        pie_adapter = PIEAdapter(pie_root=pie_dir or "data/raw/PIE")
+        pie_adapter = PIEAdapter(pie_root=pie_dir or "data/raw/PIE", stride=stride)
         pie_raw = pie_adapter.load_annotations()
         pie_lim = None if max_pie_samples <= 0 else max_pie_samples
         pie_samples = pie_adapter.extract_sequences_from_annotations(pie_raw, max_samples=pie_lim)
@@ -76,8 +78,8 @@ class MultiDatasetBuilder:
         all_samples.extend(pie_samples)
 
         # 2. Ingest JAAD (Pedestrian Companion Dataset)
-        print("\n[MultiDataset] --- Ingesting JAAD Dataset ---")
-        jaad_adapter = JAADAdapter(jaad_root=jaad_dir or "data/raw/JAAD")
+        print(f"\n[MultiDataset] --- Ingesting JAAD Dataset (stride={stride}) ---")
+        jaad_adapter = JAADAdapter(jaad_root=jaad_dir or "data/raw/JAAD", stride=stride)
         jaad_raw = jaad_adapter.load_annotations()
         jaad_lim = None if max_jaad_samples <= 0 else max_jaad_samples
         jaad_samples = jaad_adapter.extract_sequences_from_annotations(jaad_raw, max_samples=jaad_lim)
