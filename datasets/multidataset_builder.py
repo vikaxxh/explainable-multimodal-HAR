@@ -90,8 +90,8 @@ class MultiDatasetBuilder:
 
         # 3. Ingest TITAN (Honda Research Complex Interactions)
         if (titan_dir or max_titan_samples != 0) and max_titan_samples != -1:
-            print("\n[MultiDataset] --- Ingesting Honda TITAN Dataset ---")
-            titan_adapter = TITANAdapter(titan_root=titan_dir or "data/raw/TITAN")
+            print(f"\n[MultiDataset] --- Ingesting Honda TITAN Dataset (stride={stride}) ---")
+            titan_adapter = TITANAdapter(titan_root=titan_dir or "data/raw/TITAN", stride=stride)
             titan_raw = titan_adapter.load_annotations()
             titan_lim = None if max_titan_samples <= 0 else max_titan_samples
             titan_samples = titan_adapter.extract_sequences(titan_raw, max_samples=titan_lim)
