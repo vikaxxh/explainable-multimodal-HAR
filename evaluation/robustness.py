@@ -21,9 +21,10 @@ class RobustnessEvaluator:
     Stress-tests model against sensor drops and noisy inputs.
     """
 
-    def __init__(self, model: torch.nn.Module, device: str = "cpu"):
+    def __init__(self, model: torch.nn.Module, device: str = "cpu", class_names: List[str] = None):
         self.model = model
         self.device = device
+        self.class_names = class_names
         self.model.eval()
 
     @torch.no_grad()
@@ -46,7 +47,7 @@ class RobustnessEvaluator:
             y_pred.extend(preds.tolist())
             y_true.extend(targets.tolist())
 
-        return compute_classification_metrics(y_true, y_pred)
+        return compute_classification_metrics(y_true, y_pred, class_names=self.class_names)
 
     def run_all_robustness_tests(self, loader) -> Dict[str, Dict[str, Any]]:
         results = {}
