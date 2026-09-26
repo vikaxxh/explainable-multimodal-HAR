@@ -71,22 +71,34 @@ class PIEAdapter:
 
             if annotation_path is None:
                 import glob
-                found_jsons = glob.glob(os.path.join(self.pie_root, "**", "*.json"), recursive=True)
-                if found_jsons:
-                    annotation_path = found_jsons[0]
+                all_jsons = glob.glob(os.path.join(self.pie_root, "**", "*.json"), recursive=True)
+                annot_jsons = [f for f in all_jsons if "calibration" not in f.lower() and "camera_param" not in f.lower()]
+                if annot_jsons:
+                    annotation_path = annot_jsons[0]
                 else:
-                    found_pkls = glob.glob(os.path.join(self.pie_root, "**", "*.pkl"), recursive=True)
-                    if found_pkls:
-                        annotation_path = found_pkls[0]
+                    all_pkls = glob.glob(os.path.join(self.pie_root, "**", "*.pkl"), recursive=True)
+                    annot_pkls = [f for f in all_pkls if "calibration" not in f.lower() and "camera_param" not in f.lower()]
+                    if annot_pkls:
+                        annotation_path = annot_pkls[0]
 
         if annotation_path and os.path.exists(annotation_path):
-            print(f"[PIEAdapter] Loading annotations from {annotation_path}...")
-            if annotation_path.endswith(".pkl"):
-                with open(annotation_path, "rb") as f:
-                    return pickle.load(f)
-            else:
-                with open(annotation_path, "r") as f:
-                    return json.load(f)
+            try:
+                print(f"[PIEAdapter] Loading annotations from {annotation_path}...")
+                if annotation_path.endswith(".pkl"):
+                    with open(annotation_path, "rb") as f:
+                        data = pickle.load(f)
+                else:
+                    with open(annotation_path, "r") as f:
+                        data = json.load(f)
+
+                if isinstance(data, dict):
+                    has_tracks = any(isinstance(v, dict) for v in data.values())
+                    if has_tracks:
+                        return data
+                    else:
+                        print(f"[PIEAdapter] {annotation_path} is metadata/calibration, not track annotations. Skipping.")
+            except Exception as e:
+                print(f"[PIEAdapter] Error loading {annotation_path}: {e}")
 
         # Check for official PIE XML annotations directory
         xml_dir = os.path.join(self.pie_root, "annotations")
@@ -97,8 +109,8 @@ class PIEAdapter:
                 print(f"[PIEAdapter] Found {len(xml_files)} official PIE XML annotation files in {xml_dir}. Parsing...")
                 return self._parse_pie_xml_files(xml_files)
 
-        print("[PIEAdapter] No local PIE annotation file found. Providing mock/synthetic loader interface.")
-        return self._generate_mock_pie_structure()
+        print("[PIEAdapter] No valid PIE annotation tracks found on disk. Skipping PIE dataset.")
+        return {}
 
     def _parse_pie_xml_files(self, xml_files: List[str]) -> Dict[str, Any]:
         """Parses official PIE XML annotation files across all sets."""
@@ -303,7 +315,11 @@ class PIEAdapter:
         sequences = []
 
         for set_id, videos in pie_data.items():
+            if not isinstance(videos, dict):
+                continue
             for video_id, video_content in videos.items():
+                if not isinstance(video_content, dict):
+                    continue
                 ped_annotations = video_content.get("ped_annotations", {})
                 vehicle_annotations = video_content.get("vehicle_annotations", {})
 
