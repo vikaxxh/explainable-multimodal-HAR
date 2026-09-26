@@ -68,8 +68,14 @@ class MultimodalSequenceDataset(Dataset):
         try:
             if file_path.endswith(".npz"):
                 with np.load(file_path, allow_pickle=True) as data:
+                    raw_rgb = data["rgb"]
+                    if raw_rgb.shape != (self.window_size, 3, 224, 224):
+                        rgb_tensor = torch.zeros((self.window_size, 3, 224, 224), dtype=torch.float32)
+                    else:
+                        rgb_tensor = torch.from_numpy(raw_rgb).float()
+
                     return {
-                        "rgb": torch.from_numpy(data["rgb"]).float(),
+                        "rgb": rgb_tensor,
                         "pose": torch.from_numpy(data["pose"]).float(),
                         "trajectory": torch.from_numpy(data["trajectory"]).float(),
                         "scene": torch.from_numpy(data["scene"]).float(),

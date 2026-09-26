@@ -392,8 +392,8 @@ class PIEAdapter:
                         scene_seq[:, 1] = 0.7  # sidewalk
                         scene_seq[:, 0] = 0.3  # road
 
-                        # Lightweight RGB representation placeholder: (T, 3, 224, 224)
-                        rgb_seq = np.zeros((self.window_size, 3, 224, 224), dtype=np.float32)
+                        # Lightweight RGB representation placeholder
+                        rgb_seq = np.zeros((1,), dtype=np.float32)
 
                         sample = build_sample_dict(
                             rgb_frames=rgb_seq,

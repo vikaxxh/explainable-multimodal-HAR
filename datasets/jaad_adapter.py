@@ -81,7 +81,10 @@ class JAADAdapter:
         """Parses official JAAD XML annotation files into standard schema."""
         import xml.etree.ElementTree as ET
         jaad_data = {}
-        for xf in xml_files:
+        total_files = len(xml_files)
+        for idx, xf in enumerate(xml_files):
+            if (idx + 1) % 100 == 0 or idx == total_files - 1:
+                print(f"[JAADAdapter] Parsing XML annotations: {idx + 1}/{total_files}...", end="\r", flush=True)
             video_id = os.path.splitext(os.path.basename(xf))[0]
             try:
                 tree = ET.parse(xf)
@@ -132,7 +135,7 @@ class JAADAdapter:
                     jaad_data[video_id] = {"ped_annotations": ped_tracks}
             except Exception as e:
                 continue
-        print(f"[JAADAdapter] Successfully loaded real tracks from {len(jaad_data)} JAAD videos.")
+        print(f"\n[JAADAdapter] Successfully loaded real tracks from {len(jaad_data)} JAAD videos.")
         return jaad_data
 
     def _generate_mock_jaad_structure(self) -> Dict[str, Any]:
@@ -159,8 +162,12 @@ class JAADAdapter:
         Extracts synchronized temporal sequence windows (T=32) from JAAD tracks.
         """
         sequences = []
+        total_vids = len(jaad_data)
 
-        for video_id, video_content in jaad_data.items():
+        for v_idx, (video_id, video_content) in enumerate(jaad_data.items()):
+            if (v_idx + 1) % 50 == 0 or v_idx == total_vids - 1:
+                print(f"[JAADAdapter] Extracting windows: video {v_idx + 1}/{total_vids} ({len(sequences)} sequences)...", end="\r", flush=True)
+
             ped_annotations = video_content.get("ped_annotations", {})
             for ped_id, ped_data in ped_annotations.items():
                 boxes = ped_data.get("bbox", [])
@@ -193,7 +200,7 @@ class JAADAdapter:
                         ped_label = PED_TO_IDX["Standing"]
 
                     sample = build_sample_dict(
-                        rgb_frames=np.zeros((self.window_size, 3, 224, 224), dtype=np.float32),
+                        rgb_frames=np.zeros((1,), dtype=np.float32),
                         pose_seq=np.zeros((self.window_size, 18, 3), dtype=np.float32),
                         trajectory=kinematics,
                         scene_context=np.zeros((self.window_size, 10), dtype=np.float32),
@@ -208,6 +215,8 @@ class JAADAdapter:
                     sequences.append(sample)
 
                     if max_samples and len(sequences) >= max_samples:
+                        print(f"\n[JAADAdapter] Reached max sample limit: {max_samples}")
                         return sequences
 
+        print(f"\n[JAADAdapter] Extracted a total of {len(sequences)} sequences from JAAD.")
         return sequences
