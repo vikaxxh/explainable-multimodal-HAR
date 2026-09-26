@@ -59,12 +59,25 @@ class PIEAdapter:
                 os.path.join(self.pie_root, "annotations.pkl"),
                 os.path.join(self.pie_root, "pie_annotations.pkl"),
                 os.path.join(self.pie_root, "annotations", "PIE_annotations.pkl"),
-                os.path.join(self.pie_root, "annotations.json")
+                os.path.join(self.pie_root, "annotations.json"),
+                os.path.join(self.pie_root, "pie_annotations.json"),
+                os.path.join(self.pie_root, "PIE_annotations.json"),
+                os.path.join(self.pie_root, "annotations", "PIE_annotations.json")
             ]
             for c in candidates:
                 if os.path.exists(c):
                     annotation_path = c
                     break
+
+            if annotation_path is None:
+                import glob
+                found_jsons = glob.glob(os.path.join(self.pie_root, "**", "*.json"), recursive=True)
+                if found_jsons:
+                    annotation_path = found_jsons[0]
+                else:
+                    found_pkls = glob.glob(os.path.join(self.pie_root, "**", "*.pkl"), recursive=True)
+                    if found_pkls:
+                        annotation_path = found_pkls[0]
 
         if annotation_path and os.path.exists(annotation_path):
             print(f"[PIEAdapter] Loading annotations from {annotation_path}...")
