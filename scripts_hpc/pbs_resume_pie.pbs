@@ -1,0 +1,54 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Resume PIE Training from Last Epoch (to reach 50 Epochs)
+# ==============================================================================
+#PBS -N emit_resume_pie
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -o train_pie_resume.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/train_pie_resume.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "Resuming PIE Training from Last Saved Epoch"
+echo "Job ID: $PBS_JOBID on $(hostname) at $(date)"
+echo "Working Directory: $(pwd)"
+echo "=========================================================="
+
+# 1. Load MANIT CUDA module
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+
+# 2. Use direct Python interpreter from emit-har environment
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+if [ ! -f "$PYTHON_BIN" ]; then
+    PYTHON_BIN="$(which python)"
+fi
+echo "Using Python binary: $PYTHON_BIN"
+
+export PYTHONUNBUFFERED=1
+
+# 3. Locate latest checkpoint
+CKPT="experiments/checkpoints/pie/checkpoint_latest.pt"
+if [ ! -f "$CKPT" ]; then
+    CKPT="experiments/checkpoints/pie/checkpoint_best.pt"
+fi
+
+echo "Resuming from checkpoint: $CKPT"
+
+# 4. Resume training through Epoch 50
+$PYTHON_BIN train.py \
+    --config configs/config.yaml \
+    --model proposed \
+    --data_dir data/processed_pie \
+    --checkpoint_dir experiments/checkpoints/pie \
+    --resume "$CKPT" \
+    --epochs 50 \
+    --batch_size 16
+
+echo "Resumed PIE training completed all 50 epochs successfully at $(date)"
