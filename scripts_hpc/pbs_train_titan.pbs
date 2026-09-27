@@ -39,9 +39,10 @@ mkdir -p experiments/logs experiments/checkpoints/titan experiments/results
 # 3. Setup TITAN annotations directory
 bash scripts_hpc/setup_titan_annotations.sh
 
-# 4. Generate TITAN-only processed sequences
-if [ ! -d "data/processed_titan/train" ] || [ -z "$(ls -A data/processed_titan/train/*.npz 2>/dev/null)" ]; then
-    echo "Generating TITAN-only processed sequences..."
+# 4. Generate TITAN-only processed sequences (ensuring scaled dataset >= 1000 sequences)
+TRAIN_SEQS=$(ls -1 data/processed_titan/train/*.npz 2>/dev/null | wc -l)
+if [ ! -d "data/processed_titan/train" ] || [ "$TRAIN_SEQS" -lt 1000 ]; then
+    echo "Generating scaled TITAN processed sequences (current count: $TRAIN_SEQS)..."
     $PYTHON_BIN preprocess_multidataset.py \
         --max_jaad_samples -1 \
         --max_pie_samples -1 \

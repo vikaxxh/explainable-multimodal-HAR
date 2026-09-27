@@ -167,56 +167,130 @@ class TITANAdapter:
                 continue
         return titan_data
 
-    def _generate_mock_titan_structure(self) -> Dict[str, Any]:
+    def _generate_mock_titan_structure(self, num_clips: int = 250) -> Dict[str, Any]:
         """
         Generates realistic multi-agent Honda TITAN interaction clips.
-        Populates rare classes: Yielding, Avoiding, Turning, Conflict.
+        Populates all 8 behaviors with balanced distribution:
+        Yielding, Avoiding, Turning, Crossing, Walking, Standing, Stopping, Starting.
+        Includes multi-agent interactions (bicycles, vehicles, scooters) with collision conflicts.
         """
         mock_data = {}
-        for c_idx in range(1, 21):
+        behavior_cycle = [
+            "yielding", "avoiding", "crossing", "turning",
+            "stopping", "starting", "walking", "standing"
+        ]
+        rng = np.random.RandomState(42)
+
+        for c_idx in range(1, num_clips + 1):
             clip_id = f"clip_{c_idx:04d}"
             tracks = {}
+            assigned_action = behavior_cycle[(c_idx - 1) % len(behavior_cycle)]
+            clip_len = int(rng.randint(95, 125))
 
-            # Primary Pedestrian with rich interactive actions
-            behavior_cycle = ["yielding", "avoiding", "crossing", "turning", "stopping", "starting", "walking"]
-            assigned_action = behavior_cycle[c_idx % len(behavior_cycle)]
+            # Base coordinates and variations
+            x0 = float(rng.uniform(100, 300))
+            y0 = float(rng.uniform(180, 260))
+            w = float(rng.uniform(45, 55))
+            h = float(rng.uniform(130, 150))
 
             p_boxes = []
-            for t in range(80):
+            for t in range(clip_len):
                 if assigned_action == "yielding":
-                    # Decelerate, wait at curb for bicycle, then cross
-                    bx = 200 + (t * 0.5 if t < 30 else (15 if t < 60 else 15 + (t - 60) * 2.0))
+                    if t < 30:
+                        bx = x0 + t * 1.5
+                        by = y0
+                    elif t < 65:
+                        bx = x0 + 30 * 1.5 + rng.normal(0, 0.2)
+                        by = y0 + rng.normal(0, 0.2)
+                    else:
+                        bx = x0 + 45.0 + (t - 65) * 1.8
+                        by = y0 + (t - 65) * 0.8
                 elif assigned_action == "avoiding":
-                    # Swerve laterally to avoid conflict
-                    bx = 180 + t * 2.0 + (15.0 if 20 <= t <= 50 else 0.0)
+                    bx = x0 + t * 1.8
+                    phase = max(0.0, min(1.0, (t - 25) / 35.0))
+                    swerve = 25.0 * np.sin(np.pi * phase) if 25 <= t <= 60 else 0.0
+                    by = y0 + swerve
                 elif assigned_action == "turning":
-                    bx = 150 + (t * 2.0 if t < 40 else 80 + (t - 40) * 0.2)
-                else:
-                    bx = 120 + t * 2.2
-                p_boxes.append([bx, 220, 50, 140])
+                    if t < 45:
+                        bx = x0 + t * 1.6
+                        by = y0
+                    else:
+                        bx = x0 + 45 * 1.6 + rng.normal(0, 0.2)
+                        by = y0 + (t - 45) * 1.8
+                elif assigned_action == "crossing":
+                    bx = x0 + t * 1.8
+                    by = y0 + t * 0.6
+                elif assigned_action == "stopping":
+                    if t < 35:
+                        bx = x0 + t * 1.8
+                    elif t < 60:
+                        decay = max(0.0, 1.0 - (t - 35) / 25.0)
+                        bx = x0 + 35 * 1.8 + (t - 35) * 1.8 * decay
+                    else:
+                        bx = x0 + 35 * 1.8 + 25 * 0.9 + rng.normal(0, 0.2)
+                    by = y0
+                elif assigned_action == "starting":
+                    if t < 35:
+                        bx = x0 + rng.normal(0, 0.2)
+                    elif t < 60:
+                        accel = min(1.0, (t - 35) / 25.0)
+                        bx = x0 + (t - 35) * 1.8 * accel
+                    else:
+                        bx = x0 + 25 * 0.9 + (t - 60) * 2.0
+                    by = y0
+                elif assigned_action == "standing":
+                    bx = x0 + rng.normal(0, 0.2)
+                    by = y0 + rng.normal(0, 0.2)
+                else:  # walking
+                    bx = x0 + t * 1.7 + rng.normal(0, 0.2)
+                    by = y0 + rng.normal(0, 0.2)
+
+                p_boxes.append([float(bx), float(by), float(w), float(h)])
 
             tracks["ped_1"] = {
                 "label": "pedestrian",
                 "boxes": p_boxes,
-                "frames": list(range(80)),
-                "actions": [assigned_action] * 80
+                "frames": list(range(clip_len)),
+                "actions": [assigned_action] * clip_len
             }
 
-            # Interacting Agent: Oncoming Bicycle or Vehicle
+            # Interacting Agent: Oncoming vehicle, bicycle, or e-scooter
+            v_type_cycle = ["vehicle", "bicycle", "escooter"]
+            v_label = v_type_cycle[c_idx % 3]
+            v_w = 140 if v_label == "vehicle" else (65 if v_label == "bicycle" else 45)
+            v_h = 110 if v_label == "vehicle" else (120 if v_label == "bicycle" else 130)
+            vx0 = float(rng.uniform(350, 500))
+            vy0 = y0 + float(rng.uniform(-20, 20))
+            v_speed = 3.0 if v_label == "vehicle" else (2.4 if v_label == "bicycle" else 2.2)
+
             v_boxes = []
-            v_label = "bicycle" if c_idx % 2 == 0 else "vehicle"
-            for t in range(80):
-                # Moving along roadway intersecting pedestrian path
-                v_boxes.append([350 - t * 3.5, 230, 70 if v_label == "bicycle" else 150, 120])
+            for t in range(clip_len):
+                v_bx = vx0 - t * v_speed
+                v_boxes.append([float(v_bx), float(vy0), float(v_w), float(v_h)])
 
             tracks["inter_1"] = {
                 "label": v_label,
                 "boxes": v_boxes,
-                "frames": list(range(80)),
-                "actions": ["moving" if t < 35 else "yielding" for t in range(80)]
+                "frames": list(range(clip_len)),
+                "actions": ["moving" if t < 40 else ("yielding" if assigned_action == "crossing" else "moving") for t in range(clip_len)]
             }
 
+            # Dense multi-agent interaction in 50% of clips
+            if c_idx % 2 == 0:
+                p2_x0 = x0 + float(rng.uniform(60, 100))
+                p2_boxes = []
+                for t in range(clip_len):
+                    p2_bx = p2_x0 + t * 1.2
+                    p2_boxes.append([float(p2_bx), float(y0 - 40), 50.0, 140.0])
+                tracks["ped_2"] = {
+                    "label": "pedestrian",
+                    "boxes": p2_boxes,
+                    "frames": list(range(clip_len)),
+                    "actions": ["walking"] * clip_len
+                }
+
             mock_data[clip_id] = {"tracks": tracks}
+        print(f"[TITANAdapter] Generated {len(mock_data)} multi-agent interaction clips with all 8 behavioral classes.")
         return mock_data
 
     def extract_sequences(
@@ -255,7 +329,7 @@ class TITANAdapter:
                     kinematics = compute_kinematics(centers, dt=self.dt)
                     speeds = np.linalg.norm(kinematics[:, 2:4], axis=1)
 
-                    # Map to Task A (Pedestrian Behavior)
+                    # Map to Task A (Pedestrian Behavior) with balanced support
                     act_str = " ".join(win_actions)
                     if "yield" in act_str or "wait" in act_str:
                         ped_label = PED_TO_IDX["Yielding"]
@@ -265,12 +339,18 @@ class TITANAdapter:
                         ped_label = PED_TO_IDX["Turning"]
                     elif "cross" in act_str:
                         ped_label = PED_TO_IDX["Crossing"]
-                    elif np.mean(speeds) > 0.8:
-                        ped_label = PED_TO_IDX["Walking"]
+                    elif "stop" in act_str:
+                        ped_label = PED_TO_IDX["Stopping"]
+                    elif "start" in act_str:
+                        ped_label = PED_TO_IDX["Starting"]
+                    elif "stand" in act_str:
+                        ped_label = PED_TO_IDX["Standing"]
                     elif speeds[-1] < 0.2 and speeds[0] > 0.5:
                         ped_label = PED_TO_IDX["Stopping"]
                     elif speeds[-1] > 0.6 and speeds[0] < 0.2:
                         ped_label = PED_TO_IDX["Starting"]
+                    elif np.mean(speeds) > 0.6:
+                        ped_label = PED_TO_IDX["Walking"]
                     else:
                         ped_label = PED_TO_IDX["Standing"]
 
