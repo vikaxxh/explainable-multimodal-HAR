@@ -92,7 +92,7 @@ class RGBEncoder(nn.Module):
                     else:
                         d_feat = self.backbone(dummy)
                     self._cached_zero_out = self.projector(d_feat)  # (1, feature_dim)
-            return self._cached_zero_out.expand(B, T, self.feature_dim)
+            return self._cached_zero_out.view(1, 1, self.feature_dim).expand(B, T, self.feature_dim)
 
         # Standard forward pass for real RGB frames
         x = rgb_seq.view(B * T, C, H, W)
