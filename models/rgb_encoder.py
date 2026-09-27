@@ -81,7 +81,20 @@ class RGBEncoder(nn.Module):
             f_rgb: Tensor of shape (B, T, feature_dim)
         """
         B, T, C, H, W = rgb_seq.shape
-        # Collapse B and T to process through 2D CNN
+
+        # Fast path for placeholder zeros: prevents hundreds of thousands of redundant CNN passes on CPU
+        if rgb_seq.abs().max() == 0:
+            if not hasattr(self, "_cached_zero_out") or self._cached_zero_out.device != rgb_seq.device:
+                with torch.no_grad():
+                    dummy = torch.zeros(1, C, H, W, device=rgb_seq.device, dtype=rgb_seq.dtype)
+                    if self.backbone_type == "resnet18":
+                        d_feat = self.backbone(dummy).view(1, -1)
+                    else:
+                        d_feat = self.backbone(dummy)
+                    self._cached_zero_out = self.projector(d_feat)  # (1, feature_dim)
+            return self._cached_zero_out.expand(B, T, self.feature_dim)
+
+        # Standard forward pass for real RGB frames
         x = rgb_seq.view(B * T, C, H, W)
 
         if self.backbone_type == "resnet18":

@@ -95,8 +95,11 @@ def main():
 
     # 4. Standard Classification Evaluation
     y_true, y_pred = [], []
+    total_batches = len(test_loader)
+    print(f"[Eval] Starting evaluation across {len(test_ds):,} test sequences ({total_batches} batches)...")
+
     with torch.no_grad():
-        for batch in test_loader:
+        for b_idx, batch in enumerate(test_loader):
             batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
             outputs = model(batch)
             preds = torch.argmax(outputs["ped_logits"], dim=-1).cpu().numpy()
@@ -104,6 +107,11 @@ def main():
             y_pred.extend(preds.tolist())
             y_true.extend(targets.tolist())
 
+            if (b_idx + 1) % 10 == 0 or b_idx == total_batches - 1:
+                pct = ((b_idx + 1) / total_batches) * 100.0
+                print(f"[Eval] Progress: {b_idx + 1}/{total_batches} batches ({pct:.1f}%)...", end="\r", flush=True)
+
+    print()  # newline after progress bar
     metrics = compute_classification_metrics(y_true, y_pred, class_names=ped_classes)
 
     print("\n" + "="*80)
