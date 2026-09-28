@@ -64,6 +64,8 @@ def build_sample_dict(
     scene_context: np.ndarray,       # (T, 10)
     neighbor_agents: np.ndarray,     # (T, N_max, 5)
     neighbor_mask: np.ndarray,       # (T, N_max) bool
+    cross: int = 0,                  # Ground-truth binary crossing intention (0: not crossing, 1: crossing)
+    action: int = 0,                 # Ground-truth action state (0: standing, 1: walking)
     ped_label: int = 0,
     micro_label: int = 0,
     inter_label: int = 0,
@@ -80,6 +82,8 @@ def build_sample_dict(
         "scene": scene_context.astype(np.float32),
         "neighbor_agents": neighbor_agents.astype(np.float32),
         "neighbor_mask": neighbor_mask.astype(bool),
+        "cross": int(cross),
+        "action": int(action),
         "ped_label": int(ped_label),
         "micro_label": int(micro_label),
         "inter_label": int(inter_label),

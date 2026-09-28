@@ -156,15 +156,20 @@ class JAADAdapter:
     def extract_sequences_from_annotations(
         self,
         jaad_data: Dict[str, Any],
-        max_samples: Optional[int] = None
+        max_samples: Optional[int] = None,
+        video_filter: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Extracts synchronized temporal sequence windows (T=32) from JAAD tracks.
+        Extracts synchronized temporal sequence windows from JAAD tracks.
+        Optionally filters by video_id to enforce official video-disjoint partitions.
         """
         sequences = []
         total_vids = len(jaad_data)
 
         for v_idx, (video_id, video_content) in enumerate(jaad_data.items()):
+            if video_filter is not None and video_id not in video_filter:
+                continue
+
             if (v_idx + 1) % 50 == 0 or v_idx == total_vids - 1:
                 print(f"[JAADAdapter] Extracting windows: video {v_idx + 1}/{total_vids} ({len(sequences)} sequences)...", end="\r", flush=True)
 
@@ -181,14 +186,19 @@ class JAADAdapter:
                 for start in range(0, total_len - self.window_size + 1, self.stride):
                     end = start + self.window_size
                     win_boxes = boxes[start:end]
+                    win_actions = actions[start:end]
                     win_cross = cross_flags[start:end]
 
                     centers = np.array([[b[0] + b[2]/2.0, b[1] + b[3]/2.0] for b in win_boxes], dtype=np.float32)
                     kinematics = compute_kinematics(centers, dt=self.dt)
 
-                    # Classify behavior
+                    # Pure human ground-truth labels
+                    is_crossing = int(any(c == 1 for c in win_cross))
+                    is_walking = int(np.mean(win_actions) > 0.5)
+
+                    # Behavior classification for multi-class head
                     speeds = np.linalg.norm(kinematics[:, 2:4], axis=1)
-                    if any(c == 1 for c in win_cross):
+                    if is_crossing == 1:
                         ped_label = PED_TO_IDX["Crossing"]
                     elif np.mean(speeds) > 0.8:
                         ped_label = PED_TO_IDX["Walking"]
@@ -206,6 +216,8 @@ class JAADAdapter:
                         scene_context=np.zeros((self.window_size, 10), dtype=np.float32),
                         neighbor_agents=np.zeros((self.window_size, 4, 5), dtype=np.float32),
                         neighbor_mask=np.zeros((self.window_size, 4), dtype=bool),
+                        cross=is_crossing,
+                        action=is_walking,
                         ped_label=ped_label,
                         micro_label=MICRO_TO_IDX["Moving"],
                         inter_label=INTER_TO_IDX["Cooperative"],
@@ -220,3 +232,39 @@ class JAADAdapter:
 
         print(f"\n[JAADAdapter] Extracted a total of {len(sequences)} sequences from JAAD.")
         return sequences
+
+    def extract_sequences_by_split(
+        self,
+        jaad_data: Dict[str, Any],
+        split_type: str = "beh",
+        splits_dir: str = "data/splits",
+        max_samples_per_split: Optional[int] = None
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Partitions sequences strictly according to official JAAD video-disjoint splits:
+        - split_type: 'beh' (JAAD_beh default) or 'all' (JAAD_all)
+        Reads train.txt, val.txt, test.txt.
+        Guarantees zero video overlap between splits.
+        """
+        target_dir = os.path.join(splits_dir, f"jaad_{split_type}")
+        if not os.path.exists(target_dir):
+            target_dir = os.path.join(splits_dir, "jaad_beh")
+
+        def load_ids(fname):
+            p = os.path.join(target_dir, fname)
+            if os.path.exists(p):
+                with open(p, "r") as f:
+                    return [line.strip() for line in f if line.strip()]
+            return None
+
+        train_vids = load_ids("train.txt")
+        val_vids = load_ids("val.txt")
+        test_vids = load_ids("test.txt")
+
+        print(f"[JAADAdapter] Extracting sequences by official JAAD_{split_type} split...")
+        train_seqs = self.extract_sequences_from_annotations(jaad_data, max_samples=max_samples_per_split, video_filter=train_vids)
+        val_seqs = self.extract_sequences_from_annotations(jaad_data, max_samples=max_samples_per_split, video_filter=val_vids)
+        test_seqs = self.extract_sequences_from_annotations(jaad_data, max_samples=max_samples_per_split, video_filter=test_vids)
+
+        print(f"[JAADAdapter] Split counts: Train={len(train_seqs)}, Val={len(val_seqs)}, Test={len(test_seqs)}")
+        return {"train": train_seqs, "val": val_seqs, "test": test_seqs}

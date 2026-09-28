@@ -95,6 +95,11 @@ def main():
         print("\n[Interaction Faithfulness (Removing Interacting Agents)]:")
         for k, v in faith_suite["interaction_faithfulness"].items():
             print(f"  • {k}: {v}")
+
+        if "velocity_kinematic_sweep" in faith_suite:
+            print("\n[Kinematic Velocity Sweep (Confidence vs Speed Scale)]:")
+            for k, v in faith_suite["velocity_kinematic_sweep"].items():
+                print(f"  • {k}: {v}")
         print("="*70 + "\n")
 
     # 6. Save Visualizations

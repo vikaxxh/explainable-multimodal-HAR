@@ -52,7 +52,14 @@ data/raw/*
 data/annotations/*
 !data/annotations/.gitkeep
 data/splits/*
+!data/splits/*/
 !data/splits/.gitkeep
+!data/splits/**/*.txt
+
+# SSH and local credentials
+sshkey/
+*.pem
+*.key
 
 # Processed sequence datasets (generated .npz/.pt)
 data/processed/**/*.npz

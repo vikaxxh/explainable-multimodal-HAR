@@ -66,27 +66,31 @@ class MultiDatasetBuilder:
                         except OSError:
                             pass
 
-        all_samples: List[Dict[str, Any]] = []
+        splits: Dict[str, List[Dict[str, Any]]] = {
+            "train": [],
+            "val": [],
+            "test": []
+        }
 
-        # 1. Ingest PIE (Pedestrians + Bicycles)
+        # 1. Ingest PIE (Pedestrians + Bicycles) - Official Benchmark Split
         if max_pie_samples != -1:
-            print("\n[MultiDataset] --- Ingesting PIE Dataset ---")
+            print("\n[MultiDataset] --- Ingesting PIE Dataset (Official Partition: Train=01,02,04 | Val=05,06 | Test=03) ---")
             pie_adapter = PIEAdapter(pie_root=pie_dir or "data/raw/PIE", stride=stride)
             pie_raw = pie_adapter.load_annotations()
             pie_lim = None if max_pie_samples <= 0 else max_pie_samples
-            pie_samples = pie_adapter.extract_sequences_from_annotations(pie_raw, max_samples=pie_lim)
-            print(f"[MultiDataset] Extracted {len(pie_samples)} sequences from PIE.")
-            all_samples.extend(pie_samples)
+            pie_splits = pie_adapter.extract_sequences_by_split(pie_raw, max_samples_per_split=pie_lim)
+            for s in ["train", "val", "test"]:
+                splits[s].extend(pie_splits[s])
 
-        # 2. Ingest JAAD (Pedestrian Companion Dataset)
+        # 2. Ingest JAAD (Pedestrian Companion Dataset) - Official Video-Disjoint Split
         if max_jaad_samples != -1:
-            print(f"\n[MultiDataset] --- Ingesting JAAD Dataset (stride={stride}) ---")
+            print(f"\n[MultiDataset] --- Ingesting JAAD Dataset (Official Video-Disjoint Split, stride={stride}) ---")
             jaad_adapter = JAADAdapter(jaad_root=jaad_dir or "data/raw/JAAD", stride=stride)
             jaad_raw = jaad_adapter.load_annotations()
             jaad_lim = None if max_jaad_samples <= 0 else max_jaad_samples
-            jaad_samples = jaad_adapter.extract_sequences_from_annotations(jaad_raw, max_samples=jaad_lim)
-            print(f"[MultiDataset] Extracted {len(jaad_samples)} sequences from JAAD.")
-            all_samples.extend(jaad_samples)
+            jaad_splits = jaad_adapter.extract_sequences_by_split(jaad_raw, split_type="beh", max_samples_per_split=jaad_lim)
+            for s in ["train", "val", "test"]:
+                splits[s].extend(jaad_splits[s])
 
         # 3. Ingest TITAN (Honda Research Complex Interactions)
         if (titan_dir or max_titan_samples != 0) and max_titan_samples != -1:
@@ -95,8 +99,14 @@ class MultiDatasetBuilder:
             titan_raw = titan_adapter.load_annotations()
             titan_lim = None if max_titan_samples <= 0 else max_titan_samples
             titan_samples = titan_adapter.extract_sequences(titan_raw, max_samples=titan_lim)
-            print(f"[MultiDataset] Extracted {len(titan_samples)} sequences from TITAN.")
-            all_samples.extend(titan_samples)
+            # Partition TITAN disjointly
+            self.rng.shuffle(titan_samples)
+            n_t = len(titan_samples)
+            n_tr = int(n_t * self.train_ratio)
+            n_va = int(n_t * self.val_ratio)
+            splits["train"].extend(titan_samples[:n_tr])
+            splits["val"].extend(titan_samples[n_tr:n_tr + n_va])
+            splits["test"].extend(titan_samples[n_tr + n_va:])
 
         # 4. Ingest MicroVision (E-scooter Dynamics)
         if (microvision_dir or max_micro_samples != 0) and max_micro_samples != -1:
@@ -104,20 +114,17 @@ class MultiDatasetBuilder:
             micro_adapter = MicroVisionAdapter(data_root=microvision_dir or "data/raw/MicroVision")
             micro_lim = None if max_micro_samples <= 0 else max_micro_samples
             micro_samples = micro_adapter.extract_scooter_sequences(max_samples=micro_lim)
-            print(f"[MultiDataset] Extracted {len(micro_samples)} sequences from MicroVision.")
-            all_samples.extend(micro_samples)
+            self.rng.shuffle(micro_samples)
+            n_m = len(micro_samples)
+            n_tr = int(n_m * self.train_ratio)
+            n_va = int(n_m * self.val_ratio)
+            splits["train"].extend(micro_samples[:n_tr])
+            splits["val"].extend(micro_samples[n_tr:n_tr + n_va])
+            splits["test"].extend(micro_samples[n_tr + n_va:])
 
-        # 5. Shuffle and Partition
-        self.rng.shuffle(all_samples)
-        n_total = len(all_samples)
-        n_train = int(n_total * self.train_ratio)
-        n_val = int(n_total * self.val_ratio)
-
-        splits = {
-            "train": all_samples[:n_train],
-            "val": all_samples[n_train:n_train + n_val],
-            "test": all_samples[n_train + n_val:]
-        }
+        # 5. Shuffle within each split only (Zero inter-split leakage)
+        for s_name in ["train", "val", "test"]:
+            self.rng.shuffle(splits[s_name])
 
         # 6. Save to disk as .npz records
         try:
@@ -127,6 +134,7 @@ class MultiDatasetBuilder:
                 return iterable
 
         summary_counts = {}
+        n_total = sum(len(s) for s in splits.values())
         for split_name, samples in splits.items():
             split_dir = os.path.join(self.output_dir, split_name)
             os.makedirs(split_dir, exist_ok=True)
@@ -143,13 +151,15 @@ class MultiDatasetBuilder:
                     scene=sample["scene"],
                     neighbor_agents=sample["neighbor_agents"],
                     neighbor_mask=sample["neighbor_mask"],
+                    cross=sample.get("cross", 0),
+                    action=sample.get("action", 0),
                     ped_label=sample["ped_label"],
                     micro_label=sample["micro_label"],
                     inter_label=sample["inter_label"],
                     agent_type=sample["agent_type"]
                 )
 
-        print(f"\n[MultiDataset] Complete! Saved {n_total} unified multi-dataset samples into {self.output_dir}/")
+        print(f"\n[MultiDataset] Complete! Saved {n_total} leakage-free sequences into {self.output_dir}/")
         for s_name, count in summary_counts.items():
             print(f"  • {s_name}: {count} sequences")
 

@@ -20,9 +20,10 @@ from configs.config_loader import load_config
 from datasets.synthetic_dataset import SyntheticMultimodalDataset
 from datasets.multimodal_dataset import MultimodalSequenceDataset, collate_multimodal_batch
 from models.proposed_model import ProposedXMISTModel
-from evaluation.classification_metrics import compute_classification_metrics
+from evaluation.classification_metrics import compute_classification_metrics, compute_crossing_intention_metrics
 from evaluation.robustness import RobustnessEvaluator
 from evaluation.ablation import run_ablation_study
+import torch.nn.functional as F
 
 
 def parse_args():
@@ -31,6 +32,7 @@ def parse_args():
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to trained checkpoint")
     parser.add_argument("--model_type", type=str, default="proposed", help="Model type to evaluate")
     parser.add_argument("--data_dir", type=str, default="data/processed", help="Path to evaluation data")
+    parser.add_argument("--split", type=str, default="test", choices=["test", "val", "train"], help="Data split to evaluate")
     parser.add_argument("--ablation", action="store_true", help="Execute complete ablation matrix (A1 to A9)")
     parser.add_argument("--robustness", action="store_true", help="Execute robustness and sensor stress-testing")
     parser.add_argument("--synthetic", action="store_true", help="Use synthetic dataset for dry runs")
@@ -45,11 +47,12 @@ def main():
 
     print(f"[Eval] Running evaluation on device: {device}")
 
-    # Prepare Test Data
-    if args.synthetic or not os.path.exists(os.path.join(args.data_dir, "test")):
+    # Prepare Data
+    split_dir = os.path.join(args.data_dir, args.split)
+    if args.synthetic or not os.path.exists(split_dir):
         test_ds = SyntheticMultimodalDataset(num_samples=64, window_size=window_size, seed=999)
     else:
-        test_ds = MultimodalSequenceDataset(data_dir=args.data_dir, split="test", window_size=window_size)
+        test_ds = MultimodalSequenceDataset(data_dir=args.data_dir, split=args.split, window_size=window_size)
 
     test_loader = DataLoader(
         test_ds,
@@ -94,58 +97,124 @@ def main():
         return
 
     # 4. Standard Classification Evaluation
-    y_true, y_pred = [], []
+    y_true_cross, y_probs_cross, y_pred_cross = [], [], []
+    y_true_action, y_pred_action = [], []
+    y_true_ped, y_pred_ped = [], []
+    neighbor_strata = []
+
     total_batches = len(test_loader)
-    print(f"[Eval] Starting evaluation across {len(test_ds):,} test sequences ({total_batches} batches)...")
+    print(f"[Eval] Starting evaluation across {len(test_ds):,} sequences ({total_batches} batches) on split '{args.split}'...")
 
     with torch.no_grad():
         for b_idx, batch in enumerate(test_loader):
             batch = {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
             outputs = model(batch)
-            preds = torch.argmax(outputs["ped_logits"], dim=-1).cpu().numpy()
-            targets = batch["ped_label"].cpu().numpy()
-            y_pred.extend(preds.tolist())
-            y_true.extend(targets.tolist())
+
+            # 1. Primary Intention Benchmark: Dedicated crossing head
+            if "crossing_logits" in outputs:
+                cross_logits = outputs["crossing_logits"]
+                cross_probs = F.softmax(cross_logits, dim=-1)[:, 1].cpu().numpy()
+                cross_preds = torch.argmax(cross_logits, dim=-1).cpu().numpy()
+            elif "ped_logits" in outputs:
+                # Fallback for legacy checkpoints
+                ped_probs = F.softmax(outputs["ped_logits"], dim=-1)
+                cross_probs = ped_probs[:, 5].cpu().numpy() if ped_probs.shape[-1] > 5 else ped_probs[:, 0].cpu().numpy()
+                cross_preds = (torch.argmax(outputs["ped_logits"], dim=-1) == 5).long().cpu().numpy()
+            else:
+                cross_probs = np.zeros(len(batch["trajectory"]))
+                cross_preds = np.zeros(len(batch["trajectory"]), dtype=int)
+
+            if "cross" in batch:
+                cross_targets = batch["cross"].cpu().numpy()
+            elif "ped_label" in batch:
+                cross_targets = (batch["ped_label"] == 5).long().cpu().numpy()
+            else:
+                cross_targets = np.zeros(len(cross_preds), dtype=int)
+
+            y_true_cross.extend(cross_targets.tolist())
+            y_probs_cross.extend(cross_probs.tolist())
+            y_pred_cross.extend(cross_preds.tolist())
+
+            # Neighbor count stratification
+            if "neighbor_mask" in batch:
+                n_active = batch["neighbor_mask"][:, -1, :].sum(dim=-1).cpu().numpy()
+                neighbor_strata.extend(n_active.tolist())
+            else:
+                neighbor_strata.extend([0] * len(cross_targets))
+
+            # Secondary Action state (Walking vs Standing)
+            if "action_logits" in outputs and "action" in batch:
+                action_preds = torch.argmax(outputs["action_logits"], dim=-1).cpu().numpy()
+                action_targets = batch["action"].cpu().numpy()
+                y_true_action.extend(action_targets.tolist())
+                y_pred_action.extend(action_preds.tolist())
+
+            # Multi-class ped behaviors
+            if "ped_logits" in outputs and "ped_label" in batch:
+                preds = torch.argmax(outputs["ped_logits"], dim=-1).cpu().numpy()
+                targets = batch["ped_label"].cpu().numpy()
+                y_pred_ped.extend(preds.tolist())
+                y_true_ped.extend(targets.tolist())
 
             if (b_idx + 1) % 10 == 0 or b_idx == total_batches - 1:
                 pct = ((b_idx + 1) / total_batches) * 100.0
                 print(f"[Eval] Progress: {b_idx + 1}/{total_batches} batches ({pct:.1f}%)...", end="\r", flush=True)
 
     print()  # newline after progress bar
-    metrics = compute_classification_metrics(y_true, y_pred, class_names=ped_classes)
 
-    print("\n" + "="*80)
-    print(f"EVALUATION RESULTS (Total Test Sequences: {len(y_true):,})")
-    print("="*80)
+    # 1. Primary Benchmark Metrics: Crossing Intention
+    cross_metrics = compute_crossing_intention_metrics(y_true_cross, y_probs_cross, y_pred_cross)
 
-    print("\n-- 1. Multi-Class Performance Overview (Task A: 8 Behaviors) --")
-    print(f"Overall Accuracy:        {metrics['accuracy']:.2f}%")
-    print(f"Weighted-Precision:      {metrics['weighted_precision']:.2f}%")
-    print(f"Weighted-Recall:         {metrics['weighted_recall']:.2f}%")
-    print(f"Weighted-F1 (Support):   {metrics['weighted_f1']:.2f}%  (Reflects true test distribution)")
-    print(f"Active-Class Macro-F1:   {metrics['active_macro_f1']:.2f}%  (Averaged over classes with test samples)")
-    print(f"All-Class Macro-F1:      {metrics['macro_f1']:.2f}%  (Arithmetic mean over all 8 classes)")
+    print("\n" + "="*85)
+    print(f"STANDARDIZED BENCHMARK EVALUATION RESULTS ({args.split.upper()} SPLIT: {len(y_true_cross):,} SEQUENCES)")
+    print("="*85)
 
-    if "per_class" in metrics:
-        print("\n-- 2. Per-Class Performance Breakdown Table --")
-        print("-" * 80)
-        print(f"{'Class Name':<16} | {'Precision':>10} | {'Recall':>10} | {'F1-Score':>10} | {'Support (Count)':>16}")
-        print("-" * 80)
-        for c_name, c_data in metrics["per_class"].items():
-            sup_str = f"{c_data['support']:,}" if c_data['support'] > 0 else "0 (No test data)"
-            print(f"{c_name:<16} | {c_data['precision']:>9.2f}% | {c_data['recall']:>9.2f}% | {c_data['f1']:>9.2f}% | {sup_str:>16}")
-        print("-" * 80)
+    print("\n-- 1. Primary Benchmark: Crossing Intention Prediction (Human Ground Truth) --")
+    print(f"Accuracy:         {cross_metrics['accuracy']:.2f}%")
+    print(f"ROC-AUC:          {cross_metrics['auc']:.2f}%")
+    print(f"F1-Score:         {cross_metrics['f1']:.2f}%")
+    print(f"Precision:        {cross_metrics['precision']:.2f}%")
+    print(f"Recall:           {cross_metrics['recall']:.2f}%")
+    print(f"Sample Support:   {cross_metrics['crossing_count']:,} Crossing | {cross_metrics['non_crossing_count']:,} Non-Crossing")
 
-    if "binary_crossing" in metrics:
-        bc = metrics["binary_crossing"]
-        print("\n-- 3. Binary Crossing Intention Benchmark (Crossing vs. Non-Crossing) --")
-        print(f"Binary Accuracy:         {bc['accuracy']:.2f}%")
-        print(f"Binary Precision:        {bc['precision']:.2f}%")
-        print(f"Binary Recall:           {bc['recall']:.2f}%")
-        print(f"Binary F1-Score:         {bc['f1']:.2f}%")
-        print(f"Crossing Samples:        {bc['crossing_count']:,} | Non-Crossing Samples: {bc['non_crossing_count']:,}")
+    # 2. Stratified Evaluation by Neighbor Count
+    if len(neighbor_strata) == len(y_true_cross):
+        print("\n-- 2. Interaction Stratification Breakdown (by Non-Ego Neighbor Count K) --")
+        print("-" * 85)
+        print(f"{'Strata':<22} | {'Samples':>9} | {'Accuracy':>10} | {'ROC-AUC':>10} | {'F1-Score':>10} | {'Recall':>10}")
+        print("-" * 85)
+        k_arr = np.array(neighbor_strata)
+        y_t_arr = np.array(y_true_cross)
+        y_pr_arr = np.array(y_probs_cross)
+        y_p_arr = np.array(y_pred_cross)
 
-    print("="*80 + "\n")
+        for s_label, mask in [
+            ("K = 0 (Ego-only)", k_arr == 0),
+            ("K = 1 (1 Neighbor)", k_arr == 1),
+            ("K >= 2 (Dense Multi-Agent)", k_arr >= 2),
+            ("All Sequences", np.ones(len(k_arr), dtype=bool))
+        ]:
+            if np.sum(mask) > 0:
+                s_met = compute_crossing_intention_metrics(y_t_arr[mask], y_pr_arr[mask], y_p_arr[mask])
+                print(f"{s_label:<22} | {np.sum(mask):>9,} | {s_met['accuracy']:>9.2f}% | {s_met['auc']:>9.2f}% | {s_met['f1']:>9.2f}% | {s_met['recall']:>9.2f}%")
+            else:
+                print(f"{s_label:<22} | {0:>9} | {'N/A':>10} | {'N/A':>10} | {'N/A':>10} | {'N/A':>10}")
+        print("-" * 85)
+        print("Note: On PIE/JAAD, ego-vehicle is the primary interaction partner (majority K=0 non-ego).")
+
+    # 3. Secondary Action State Benchmark (Standing vs Walking)
+    if y_true_action and len(y_true_action) > 0:
+        act_met = compute_crossing_intention_metrics(y_true_action, y_pred_action, y_pred_action)
+        print("\n-- 3. Secondary Benchmark: Action State Recognition (Standing vs. Walking) --")
+        print(f"Action Accuracy:  {act_met['accuracy']:.2f}% | F1: {act_met['f1']:.2f}% | Prec: {act_met['precision']:.2f}% | Rec: {act_met['recall']:.2f}%")
+
+    # 4. Multi-Class Behavioral Overview
+    if y_true_ped and len(y_true_ped) > 0:
+        metrics = compute_classification_metrics(y_true_ped, y_pred_ped, class_names=ped_classes)
+        print("\n-- 4. Multi-Class Behavioral Breakdown (Pedestrian Head) --")
+        print(f"Overall Accuracy: {metrics['accuracy']:.2f}% | Weighted-F1: {metrics['weighted_f1']:.2f}% | Macro-F1: {metrics['macro_f1']:.2f}%")
+
+    print("="*85 + "\n")
 
 
 if __name__ == "__main__":

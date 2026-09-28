@@ -120,6 +120,10 @@ class SyntheticMultimodalDataset(Dataset):
         for c in range(3):
             rgb[:, c, :, :] = (grid_y * (c + 1) / 3.0).astype(np.float32)
 
+        # Ground-truth binary crossing intent and action state
+        cross = 1 if ped_label == 5 else int(self.rng.rand() > 0.5)
+        action = 1 if ped_label in [0, 5] else 0
+
         return {
             "rgb": rgb,
             "pose": pose,
@@ -127,6 +131,8 @@ class SyntheticMultimodalDataset(Dataset):
             "scene": scene,
             "neighbor_agents": neighbor_agents,
             "neighbor_mask": neighbor_mask,
+            "cross": cross,
+            "action": action,
             "ped_label": ped_label,
             "micro_label": micro_label,
             "inter_label": inter_label,
@@ -145,6 +151,8 @@ class SyntheticMultimodalDataset(Dataset):
             "scene": torch.from_numpy(sample["scene"]),
             "neighbor_agents": torch.from_numpy(sample["neighbor_agents"]),
             "neighbor_mask": torch.from_numpy(sample["neighbor_mask"]),
+            "cross": torch.tensor(sample.get("cross", 1 if sample["ped_label"] == 5 else 0), dtype=torch.long),
+            "action": torch.tensor(sample.get("action", 1), dtype=torch.long),
             "ped_label": torch.tensor(sample["ped_label"], dtype=torch.long),
             "micro_label": torch.tensor(sample["micro_label"], dtype=torch.long),
             "inter_label": torch.tensor(sample["inter_label"], dtype=torch.long)

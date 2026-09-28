@@ -60,6 +60,8 @@ class MultiTaskBehaviorLoss(nn.Module):
 
     def __init__(
         self,
+        lambda_cross: float = 2.0,
+        lambda_action: float = 1.0,
         lambda_ped: float = 1.0,
         lambda_micro: float = 1.0,
         lambda_inter: float = 1.0,
@@ -70,6 +72,8 @@ class MultiTaskBehaviorLoss(nn.Module):
         label_smoothing: float = 0.05
     ):
         super().__init__()
+        self.lambda_cross = lambda_cross
+        self.lambda_action = lambda_action
         self.lambda_ped = lambda_ped
         self.lambda_micro = lambda_micro
         self.lambda_inter = lambda_inter
@@ -77,10 +81,14 @@ class MultiTaskBehaviorLoss(nn.Module):
         self.lambda_xai = lambda_xai
 
         if use_focal_loss:
+            self.crit_cross = FocalLoss(gamma=gamma, label_smoothing=label_smoothing)
+            self.crit_action = FocalLoss(gamma=gamma, label_smoothing=label_smoothing)
             self.crit_ped = FocalLoss(gamma=gamma, label_smoothing=label_smoothing)
             self.crit_micro = FocalLoss(gamma=gamma, label_smoothing=label_smoothing)
             self.crit_inter = FocalLoss(gamma=gamma, label_smoothing=label_smoothing)
         else:
+            self.crit_cross = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+            self.crit_action = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
             self.crit_ped = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
             self.crit_micro = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
             self.crit_inter = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
@@ -94,6 +102,18 @@ class MultiTaskBehaviorLoss(nn.Module):
     ) -> Dict[str, torch.Tensor]:
         loss_dict = {}
         total_loss = 0.0
+
+        # 0. Primary Benchmark Task: Binary Crossing Intention (Ground Truth Cross)
+        if "crossing_logits" in outputs and "cross" in targets:
+            l_cross = self.crit_cross(outputs["crossing_logits"], targets["cross"])
+            loss_dict["loss_cross"] = l_cross
+            total_loss += self.lambda_cross * l_cross
+
+        # Secondary Human Action Task: Walking vs Standing (Ground Truth Action)
+        if "action_logits" in outputs and "action" in targets:
+            l_action = self.crit_action(outputs["action_logits"], targets["action"])
+            loss_dict["loss_action"] = l_action
+            total_loss += self.lambda_action * l_action
 
         # 1. Task A: Pedestrian Behavior (Focal Loss)
         if "ped_logits" in outputs and "ped_label" in targets:

@@ -96,8 +96,8 @@ class Trainer:
         self.model.train()
         total_loss = 0.0
         num_batches = len(self.train_loader)
-        correct_ped = 0
-        total_ped = 0
+        correct_ped, total_ped = 0, 0
+        correct_cross, total_cross = 0, 0
 
         for batch_idx, batch in enumerate(self.train_loader):
             # Apply physics-consistent multimodal data augmentation
@@ -128,22 +128,30 @@ class Trainer:
 
             total_loss += loss.item()
 
+            if "crossing_logits" in outputs and "cross" in batch:
+                c_preds = torch.argmax(outputs["crossing_logits"], dim=-1)
+                correct_cross += (c_preds == batch["cross"]).sum().item()
+                total_cross += batch["cross"].size(0)
+
             if "ped_logits" in outputs and "ped_label" in batch:
                 preds = torch.argmax(outputs["ped_logits"], dim=-1)
                 correct_ped += (preds == batch["ped_label"]).sum().item()
                 total_ped += batch["ped_label"].size(0)
 
         avg_loss = total_loss / max(1, num_batches)
-        accuracy = (correct_ped / max(1, total_ped)) * 100.0
-        return {"train_loss": avg_loss, "train_acc_ped": accuracy}
+        ped_accuracy = (correct_ped / max(1, total_ped)) * 100.0
+        res = {"train_loss": avg_loss, "train_acc_ped": ped_accuracy}
+        if total_cross > 0:
+            res["train_acc_cross"] = (correct_cross / total_cross) * 100.0
+        return res
 
     @torch.no_grad()
     def evaluate(self) -> Dict[str, float]:
         self.model.eval()
         total_loss = 0.0
         num_batches = len(self.val_loader)
-        correct_ped = 0
-        total_ped = 0
+        correct_ped, total_ped = 0, 0
+        correct_cross, total_cross = 0, 0
 
         amp_enabled = (self.mixed_precision in ["fp16", "bf16"] and self.device.type == "cuda")
         try:
@@ -159,14 +167,23 @@ class Trainer:
                 loss = loss_dict["loss_total"]
 
             total_loss += loss.item()
+
+            if "crossing_logits" in outputs and "cross" in batch:
+                c_preds = torch.argmax(outputs["crossing_logits"], dim=-1)
+                correct_cross += (c_preds == batch["cross"]).sum().item()
+                total_cross += batch["cross"].size(0)
+
             if "ped_logits" in outputs and "ped_label" in batch:
                 preds = torch.argmax(outputs["ped_logits"], dim=-1)
                 correct_ped += (preds == batch["ped_label"]).sum().item()
                 total_ped += batch["ped_label"].size(0)
 
         avg_loss = total_loss / max(1, num_batches)
-        accuracy = (correct_ped / max(1, total_ped)) * 100.0
-        return {"val_loss": avg_loss, "val_acc_ped": accuracy}
+        ped_accuracy = (correct_ped / max(1, total_ped)) * 100.0
+        res = {"val_loss": avg_loss, "val_acc_ped": ped_accuracy}
+        if total_cross > 0:
+            res["val_acc_cross"] = (correct_cross / total_cross) * 100.0
+        return res
 
     def save_checkpoint(self, epoch: int, is_best: bool = False):
         if self.rank != 0:
@@ -247,9 +264,11 @@ class Trainer:
             self.save_checkpoint(epoch, is_best=is_best)
 
             if self.rank == 0:
+                tr_cross = f" | Cross Acc: {train_metrics['train_acc_cross']:.1f}%" if "train_acc_cross" in train_metrics else ""
+                val_cross = f" | Val Cross Acc: {val_metrics['val_acc_cross']:.1f}%" if "val_acc_cross" in val_metrics else ""
                 print(
                     f"Epoch [{epoch+1:02d}/{self.epochs:02d}] "
-                    f"Train Loss: {train_metrics['train_loss']:.4f} | Acc: {train_metrics['train_acc_ped']:.1f}% | "
-                    f"Val Loss: {val_metrics['val_loss']:.4f} | Acc: {val_metrics['val_acc_ped']:.1f}% | "
+                    f"Train Loss: {train_metrics['train_loss']:.4f}{tr_cross} (Ped: {train_metrics['train_acc_ped']:.1f}%) | "
+                    f"Val Loss: {val_metrics['val_loss']:.4f}{val_cross} (Ped: {val_metrics['val_acc_ped']:.1f}%) | "
                     f"Time: {duration:.1f}s"
                 )

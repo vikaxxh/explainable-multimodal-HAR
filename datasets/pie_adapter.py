@@ -307,16 +307,21 @@ class PIEAdapter:
     def extract_sequences_from_annotations(
         self,
         pie_data: Dict[str, Any],
-        max_samples: Optional[int] = None
+        max_samples: Optional[int] = None,
+        set_filter: Optional[List[str]] = None
     ) -> List[Dict[str, Any]]:
         """
-        Converts raw PIE nested track structure into standardized temporal sequence windows (T=32).
+        Converts raw PIE nested track structure into standardized temporal sequence windows.
+        Optionally filters by set_id to adhere strictly to official train/val/test partitions.
         """
         sequences = []
 
         for set_id, videos in pie_data.items():
             if not isinstance(videos, dict):
                 continue
+            if set_filter is not None and set_id not in set_filter:
+                continue
+
             for video_id, video_content in videos.items():
                 if not isinstance(video_content, dict):
                     continue
@@ -326,7 +331,6 @@ class PIEAdapter:
                 # Find all bicycle tracks in this video
                 bicycle_tracks = {}
                 for v_id, v_data in vehicle_annotations.items():
-                    # PIE vehicle annotations might classify by type (bicycle, car, etc.)
                     v_type = v_data.get("type", "vehicle")
                     if "bike" in v_id.lower() or v_type == "bicycle":
                         bicycle_tracks[v_id] = v_data
@@ -342,7 +346,7 @@ class PIEAdapter:
                     if total_len < self.window_size:
                         continue
 
-                    # Sliding temporal windows (e.g. 32 frames)
+                    # Sliding temporal windows
                     for start in range(0, total_len - self.window_size + 1, self.stride):
                         end = start + self.window_size
                         win_boxes = boxes[start:end]
@@ -353,7 +357,11 @@ class PIEAdapter:
                         centers = np.array([[b[0] + b[2]/2.0, b[1] + b[3]/2.0] for b in win_boxes], dtype=np.float32)
                         primary_kinematics = compute_kinematics(centers, dt=self.dt)
 
-                        # Primary behavior label
+                        # Pure human ground-truth labels (zero heuristic derivation)
+                        is_crossing = int(any(c == 1 for c in win_cross))
+                        is_walking = int(np.mean(win_actions) > 0.5)
+
+                        # Primary behavior label for multi-class head
                         ped_label = self.map_pie_action_to_taxonomy(win_actions, win_cross, primary_kinematics)
 
                         # Check interacting neighbors (bicycles / other pedestrians)
@@ -382,12 +390,10 @@ class PIEAdapter:
                                     n_idx += 1
 
                         # Synthesize or extract pose and scene features
-                        # Pose: (T, 18, 3) normalized to bbox
                         pose_seq = np.zeros((self.window_size, 18, 3), dtype=np.float32)
                         pose_seq[:, :, :2] = 0.5
                         pose_seq[:, :, 2] = 0.9
 
-                        # Scene: (T, 10) semantic context
                         scene_seq = np.zeros((self.window_size, 10), dtype=np.float32)
                         scene_seq[:, 1] = 0.7  # sidewalk
                         scene_seq[:, 0] = 0.3  # road
@@ -402,6 +408,8 @@ class PIEAdapter:
                             scene_context=scene_seq,
                             neighbor_agents=neighbor_trajs,
                             neighbor_mask=neighbor_mask,
+                            cross=is_crossing,
+                            action=is_walking,
                             ped_label=ped_label,
                             micro_label=micro_label,
                             inter_label=inter_label,
@@ -414,3 +422,27 @@ class PIEAdapter:
                             return sequences
 
         return sequences
+
+    def extract_sequences_by_split(
+        self,
+        pie_data: Dict[str, Any],
+        max_samples_per_split: Optional[int] = None
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Partitions sequences strictly according to the official PIE benchmark:
+        - Train: Set 01, Set 02, Set 04
+        - Validation: Set 05, Set 06
+        - Test: Set 03 (Standard official benchmark test set)
+        Zero inter-video / inter-set leakage.
+        """
+        train_sets = ["set01", "set02", "set04"]
+        val_sets = ["set05", "set06"]
+        test_sets = ["set03"]
+
+        print("[PIEAdapter] Extracting sequences strictly by official PIE partitions...")
+        train_seqs = self.extract_sequences_from_annotations(pie_data, max_samples=max_samples_per_split, set_filter=train_sets)
+        val_seqs = self.extract_sequences_from_annotations(pie_data, max_samples=max_samples_per_split, set_filter=val_sets)
+        test_seqs = self.extract_sequences_from_annotations(pie_data, max_samples=max_samples_per_split, set_filter=test_sets)
+
+        print(f"[PIEAdapter] Split counts: Train={len(train_seqs)}, Val={len(val_seqs)}, Test(Set03)={len(test_seqs)}")
+        return {"train": train_seqs, "val": val_seqs, "test": test_seqs}

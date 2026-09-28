@@ -29,6 +29,7 @@ from models.interaction_graph import DynamicInteractionGraph
 from models.interaction_transformer import DynamicInteractionTransformer
 from models.temporal_transformer import TemporalTransformer
 from heads.pedestrian_behavior import PedestrianBehaviorHead
+from heads.crossing_intention import CrossingIntentionHead, ActionStateHead
 from heads.micromobility_behavior import MicromobilityBehaviorHead
 from heads.interaction import InteractionBehaviorHead
 from datasets.taxonomy import PEDESTRIAN_CLASSES, MICROMOBILITY_CLASSES, INTERACTION_CLASSES
@@ -94,6 +95,8 @@ class ProposedXMISTModel(nn.Module):
         self.temporal_transformer = TemporalTransformer(feature_dim=feature_dim, num_layers=3, dropout=dropout)
 
         # 6. Multi-Task Behavior Heads
+        self.crossing_head = CrossingIntentionHead(feature_dim=feature_dim, dropout=dropout)
+        self.action_head = ActionStateHead(feature_dim=feature_dim, dropout=dropout)
         self.ped_head = PedestrianBehaviorHead(feature_dim=feature_dim, num_classes=num_ped_classes, dropout=dropout)
         self.micro_head = MicromobilityBehaviorHead(feature_dim=feature_dim, num_classes=num_micro_classes, dropout=dropout)
         self.inter_head = InteractionBehaviorHead(feature_dim=feature_dim, num_classes=num_inter_classes, dropout=dropout)
@@ -149,12 +152,16 @@ class ProposedXMISTModel(nn.Module):
         z, temporal_attn = self.temporal_transformer(f_fused)
 
         # 6. Multi-task Heads
+        crossing_logits = torch.nan_to_num(self.crossing_head(z), nan=0.0)
+        action_logits = torch.nan_to_num(self.action_head(z), nan=0.0)
         ped_logits = torch.nan_to_num(self.ped_head(z), nan=0.0)
         micro_logits = torch.nan_to_num(self.micro_head(z), nan=0.0)
         inter_logits = torch.nan_to_num(self.inter_head(z), nan=0.0)
 
         return {
             # Predictions
+            "crossing_logits": crossing_logits,
+            "action_logits": action_logits,
             "ped_logits": ped_logits,
             "micro_logits": micro_logits,
             "inter_logits": inter_logits,

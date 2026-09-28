@@ -74,6 +74,10 @@ class MultimodalSequenceDataset(Dataset):
                     else:
                         rgb_tensor = torch.from_numpy(raw_rgb).float()
 
+                    ped_lbl = int(data["ped_label"])
+                    cross_lbl = int(data["cross"]) if "cross" in data else (1 if ped_lbl == 5 else 0)
+                    action_lbl = int(data["action"]) if "action" in data else (1 if ped_lbl in [0, 5] else 0)
+
                     return {
                         "rgb": rgb_tensor,
                         "pose": torch.from_numpy(data["pose"]).float(),
@@ -81,7 +85,9 @@ class MultimodalSequenceDataset(Dataset):
                         "scene": torch.from_numpy(data["scene"]).float(),
                         "neighbor_agents": torch.from_numpy(data["neighbor_agents"]).float(),
                         "neighbor_mask": torch.from_numpy(data["neighbor_mask"]).bool(),
-                        "ped_label": torch.tensor(int(data["ped_label"]), dtype=torch.long),
+                        "cross": torch.tensor(cross_lbl, dtype=torch.long),
+                        "action": torch.tensor(action_lbl, dtype=torch.long),
+                        "ped_label": torch.tensor(ped_lbl, dtype=torch.long),
                         "micro_label": torch.tensor(int(data["micro_label"]), dtype=torch.long),
                         "inter_label": torch.tensor(int(data["inter_label"]), dtype=torch.long)
                     }

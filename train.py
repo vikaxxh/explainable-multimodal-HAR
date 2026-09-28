@@ -49,6 +49,7 @@ def parse_args():
     parser.add_argument("--distributed", action="store_true", help="Enable multi-GPU DistributedDataParallel")
     parser.add_argument("--checkpoint_dir", type=str, default=None, help="Custom checkpoint save directory")
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--local_rank", type=int, default=-1, help="Local rank for torchrun DDP")
     return parser.parse_args()
 
@@ -92,6 +93,15 @@ def build_model(model_type: str, config: dict, device: torch.device) -> torch.nn
 def main():
     args = parse_args()
     config = load_config(args.config)
+
+    # Set deterministic random seed
+    import random
+    import numpy as np
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(args.seed)
 
     # CLI Overrides
     if args.epochs is not None:
