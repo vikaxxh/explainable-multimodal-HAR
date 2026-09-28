@@ -25,6 +25,7 @@ def parse_args():
     parser.add_argument("--config", type=str, default="configs/config.yaml")
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--sample_idx", type=int, default=0)
+    parser.add_argument("--data_dir", type=str, default=None, help="Path to processed dataset directory")
     parser.add_argument("--output_dir", type=str, default="experiments/results/xai")
     parser.add_argument("--faithfulness", action="store_true", help="Run quantitative XAI faithfulness tests")
     parser.add_argument("--visualize", action="store_true", help="Save visualization figures")
@@ -38,10 +39,11 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
 
     # 1. Load sample sequence
-    test_dir = os.path.join(config["project"].get("data_dir", "data/processed"), "test")
+    resolved_data_dir = args.data_dir if args.data_dir else config["project"].get("data_dir", "data/processed")
+    test_dir = os.path.join(resolved_data_dir, "test")
     if os.path.exists(test_dir):
         from datasets.multimodal_dataset import MultimodalSequenceDataset
-        dataset = MultimodalSequenceDataset(data_dir=config["project"].get("data_dir", "data/processed"), split="test")
+        dataset = MultimodalSequenceDataset(data_dir=resolved_data_dir, split="test")
         print(f"[XAI] Loaded sample #{args.sample_idx} from real test sequences ({len(dataset)} available).")
     else:
         dataset = SyntheticMultimodalDataset(num_samples=16, window_size=config["data"]["window_size"])
