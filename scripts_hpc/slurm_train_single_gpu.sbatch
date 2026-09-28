@@ -26,16 +26,46 @@ module load cuda/11.8 2>/dev/null || module load cuda 2>/dev/null || true
 source ~/.bashrc
 conda activate emit-har || source activate emit-har
 
-# 3. Create logging and checkpoint directories
-mkdir -p experiments/logs experiments/checkpoints experiments/results
+# 3. Parameters (Configurable via command-line arguments)
+DATA_DIR=${1:-"data/processed_pie_clean"}
+SEED=${2:-42}
+CHECKPOINT_DIR="experiments/checkpoints/pie_seed${SEED}"
+
+mkdir -p experiments/logs "$CHECKPOINT_DIR" experiments/results
+
+echo "=========================================================="
+echo "Configuration: Data=$DATA_DIR | Seed=$SEED | Checkpoints=$CHECKPOINT_DIR"
+echo "=========================================================="
 
 # 4. Launch Training
-# Train full proposed architecture with mixed precision
 python train.py \
     --config configs/config.yaml \
+    --data_dir "$DATA_DIR" \
+    --checkpoint_dir "$CHECKPOINT_DIR" \
+    --seed "$SEED" \
     --model proposed \
     --epochs 50 \
     --batch_size 16 \
     --lr 0.0001
 
 echo "Training completed at $(date)"
+
+# 5. Evaluate Best Checkpoint on Test Split
+echo "=========================================================="
+echo "Running Benchmark Evaluation on Test Split..."
+echo "=========================================================="
+python evaluate.py \
+    --checkpoint "$CHECKPOINT_DIR/checkpoint_best.pt" \
+    --data_dir "$DATA_DIR" \
+    --split test
+
+# 6. Quantitative XAI Faithfulness Verification
+echo "=========================================================="
+echo "Running Distance-Matched XAI Faithfulness Verification..."
+echo "=========================================================="
+python explain.py \
+    --checkpoint "$CHECKPOINT_DIR/checkpoint_best.pt" \
+    --data_dir "$DATA_DIR" \
+    --faithfulness
+
+echo "Job $SLURM_JOB_ID fully completed at $(date)"

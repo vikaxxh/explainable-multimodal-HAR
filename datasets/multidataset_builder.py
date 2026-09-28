@@ -28,12 +28,14 @@ class MultiDatasetBuilder:
         train_ratio: float = 0.7,
         val_ratio: float = 0.15,
         test_ratio: float = 0.15,
+        window_size: int = 32,
         seed: int = 42
     ):
         self.output_dir = output_dir
         self.train_ratio = train_ratio
         self.val_ratio = val_ratio
         self.test_ratio = test_ratio
+        self.window_size = window_size
         self.rng = np.random.RandomState(seed)
 
     def build(
@@ -75,7 +77,7 @@ class MultiDatasetBuilder:
         # 1. Ingest PIE (Pedestrians + Bicycles) - Official Benchmark Split
         if max_pie_samples != -1:
             print("\n[MultiDataset] --- Ingesting PIE Dataset (Official Partition: Train=01,02,04 | Val=05,06 | Test=03) ---")
-            pie_adapter = PIEAdapter(pie_root=pie_dir or "data/raw/PIE", stride=stride)
+            pie_adapter = PIEAdapter(pie_root=pie_dir or "data/raw/PIE", window_size=self.window_size, stride=stride)
             pie_raw = pie_adapter.load_annotations()
             pie_lim = None if max_pie_samples <= 0 else max_pie_samples
             pie_splits = pie_adapter.extract_sequences_by_split(pie_raw, max_samples_per_split=pie_lim)
@@ -85,7 +87,7 @@ class MultiDatasetBuilder:
         # 2. Ingest JAAD (Pedestrian Companion Dataset) - Official Video-Disjoint Split
         if max_jaad_samples != -1:
             print(f"\n[MultiDataset] --- Ingesting JAAD Dataset (Official Video-Disjoint Split, stride={stride}) ---")
-            jaad_adapter = JAADAdapter(jaad_root=jaad_dir or "data/raw/JAAD", stride=stride)
+            jaad_adapter = JAADAdapter(jaad_root=jaad_dir or "data/raw/JAAD", window_size=self.window_size, stride=stride)
             jaad_raw = jaad_adapter.load_annotations()
             jaad_lim = None if max_jaad_samples <= 0 else max_jaad_samples
             jaad_splits = jaad_adapter.extract_sequences_by_split(jaad_raw, split_type="beh", max_samples_per_split=jaad_lim)
