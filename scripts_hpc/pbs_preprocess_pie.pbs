@@ -1,0 +1,29 @@
+#!/bin/bash
+#PBS -N preprocess_pie
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o preprocess_pie.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+export PYTHONUNBUFFERED=1
+
+echo "=========================================================="
+echo "Starting Clean PIE Preprocessing at $(date)"
+echo "=========================================================="
+
+$PYTHON_BIN preprocess_multidataset.py \
+    --pie_dir data/raw/PIE \
+    --max_jaad_samples -1 \
+    --max_pie_samples 0 \
+    --max_titan_samples -1 \
+    --max_micro_samples -1 \
+    --output_dir data/processed_pie \
+    --stride 4 \
+    --clean
+
+echo "Preprocessing completed successfully at $(date)"
