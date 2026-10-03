@@ -80,10 +80,11 @@ class DynamicInteractionGraph(nn.Module):
 
         # 4. Closing speed & TTC
         unit_rel = rel_pos / (dist + eps)
+        # Signed line-of-sight closing velocity: positive for closing, negative for separating
         closing_speed = -torch.sum(rel_vel * unit_rel, dim=-1, keepdim=True)
-        closing_speed = torch.clamp(closing_speed, min=0.0)
+        # Note: Do NOT clamp closing_speed to min=0.0; negative values indicate separating agents!
 
-        ttc = torch.where(closing_speed > 0.1, dist / (closing_speed + eps), torch.tensor(10.0, device=dist.device))
+        ttc = torch.where(closing_speed > 0.1, dist / (torch.clamp(closing_speed, min=1e-3) + eps), torch.tensor(10.0, device=dist.device))
         ttc = torch.clamp(ttc, 0.0, 10.0)                # (B, T, N, 1)
 
         # Combined edge features
@@ -97,3 +98,20 @@ class DynamicInteractionGraph(nn.Module):
         edge_embed = self.edge_mlp(edge_feats)
 
         return edge_feats, edge_embed, adj_mask
+
+    @staticmethod
+    def compute_closing_velocity(p_pos: torch.Tensor, p_vel: torch.Tensor, n_pos: torch.Tensor, n_vel: torch.Tensor) -> torch.Tensor:
+        """
+        Computes signed line-of-sight closing velocity:
+            v_closing = - (v_rel . unit_r)
+        Returns:
+            > 0: distance is decreasing (approaching/closing)
+            < 0: distance is increasing (separating/diverging)
+            == 0: stationary or perpendicular motion
+        """
+        rel_pos = p_pos - n_pos
+        dist = torch.norm(rel_pos, dim=-1, keepdim=True)
+        rel_vel = p_vel - n_vel
+        unit_rel = rel_pos / (dist + 1e-6)
+        return -torch.sum(rel_vel * unit_rel, dim=-1, keepdim=True)
+

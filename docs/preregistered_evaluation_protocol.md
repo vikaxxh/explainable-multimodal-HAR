@@ -92,7 +92,8 @@
   $$p(t) = p(T_{obs}) - \alpha \cdot (p(T_{obs}) - p(t)), \quad v(t) = \alpha \cdot v(t)$$
 * **Closing Vector Definition:**
   $$\vec{r} = \vec{p}_{ped} - \vec{p}_{nbr}, \quad \vec{v}_{rel} = \vec{v}_{ped} - \vec{v}_{nbr}, \quad v_{closing} = -\frac{\vec{r} \cdot \vec{v}_{rel}}{\|\vec{r}\| + \epsilon}$$
-  * If $v_{closing} \le 0.1 \implies$ Separating / non-conflicting.
+  * If $v_{closing} > 0 \implies$ Closing / approaching.
+  * If $v_{closing} \le 0 \implies$ Separating / diverging.
 * **Metric:**
   * Per-sample Spearman rank correlation $\rho(\alpha, p_{cross})$.
   * Share of closing samples exhibiting expected negative correlation ($\rho < -0.50$).

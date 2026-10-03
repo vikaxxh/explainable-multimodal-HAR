@@ -158,7 +158,9 @@ class MultiDatasetBuilder:
                     ped_label=sample["ped_label"],
                     micro_label=sample["micro_label"],
                     inter_label=sample["inter_label"],
-                    agent_type=sample["agent_type"]
+                    agent_type=sample["agent_type"],
+                    metadata=sample.get("metadata", {}),
+                    ped_id=str(sample.get("metadata", {}).get("ped_id", ""))
                 )
 
         print(f"\n[MultiDataset] Complete! Saved {n_total} leakage-free sequences into {self.output_dir}/")

@@ -96,14 +96,31 @@ def compute_edge_features(
     heading_diff = np.abs(head_i - head_j) % (2 * np.pi)
     heading_diff = np.minimum(heading_diff, 2 * np.pi - heading_diff)[:, np.newaxis]
 
-    # Closing velocity along the line-of-sight
+    # Closing velocity along the line-of-sight: positive for closing, negative for separating
     unit_rel_pos = rel_pos / (dist + eps)
     closing_speed = -np.sum(rel_vel * unit_rel_pos, axis=1, keepdims=True)
-    closing_speed = np.maximum(closing_speed, 0.0)
+    # Note: Do NOT clamp closing_speed to 0; negative values distinguish separating agents!
 
     # Time To Collision (TTC) clipped to [0, 10] seconds for numerical stability
-    ttc = np.where(closing_speed > 0.1, dist / (closing_speed + eps), 10.0)
+    ttc = np.where(closing_speed > 0.1, dist / (np.maximum(closing_speed, 1e-3) + eps), 10.0)
     ttc = np.clip(ttc, 0.0, 10.0)
 
     edge_feats = np.hstack([dist, speed_diff, heading_diff, ttc])
     return edge_feats.astype(np.float32)
+
+
+def compute_closing_velocity(pos_i: np.ndarray, vel_i: np.ndarray, pos_j: np.ndarray, vel_j: np.ndarray) -> np.ndarray:
+    """
+    Computes signed line-of-sight closing velocity:
+        v_closing = - (v_rel . unit_r)
+    Returns:
+        > 0: distance is decreasing (approaching/closing)
+        < 0: distance is increasing (separating/diverging)
+        == 0: stationary or perpendicular motion
+    """
+    rel_pos = pos_i - pos_j
+    dist = np.linalg.norm(rel_pos, axis=-1, keepdims=True)
+    rel_vel = vel_i - vel_j
+    unit_rel = rel_pos / (dist + 1e-6)
+    return -np.sum(rel_vel * unit_rel, axis=-1, keepdims=True)
+

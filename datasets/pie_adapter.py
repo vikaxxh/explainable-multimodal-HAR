@@ -39,7 +39,7 @@ class PIEAdapter:
         window_size: int = 32,
         stride: int = 8,
         fps: float = 10.0,
-        distance_threshold: float = 12.0
+        distance_threshold: float = 0.20
     ):
         self.pie_root = pie_root
         self.window_size = window_size
@@ -124,7 +124,7 @@ class PIEAdapter:
                 if p.startswith("set"):
                     set_id = p
                     break
-            video_id = os.path.splitext(os.path.basename(xf))[0].replace("_annot", "")
+            video_id = os.path.splitext(os.path.basename(xf))[0].replace("_annot", "").replace("_annt", "")
 
             if set_id not in pie_data:
                 pie_data[set_id] = {}
@@ -133,11 +133,14 @@ class PIEAdapter:
                 tree = ET.parse(xf)
                 root = tree.getroot()
                 ped_tracks = {}
-                bike_tracks = {}
+                vehicle_tracks = {}
 
                 for track in root.findall(".//track"):
                     label = track.get("label", "").lower()
-                    track_id = track.get("id", "")
+                    if label not in ["pedestrian", "vehicle", "car", "truck", "bus", "bicycle", "bicyclist", "bike"]:
+                        continue
+
+                    track_id = ""
                     boxes, frames, cross_flags, actions = [], [], [], []
 
                     for box in track.findall("box"):
@@ -157,11 +160,13 @@ class PIEAdapter:
                         action_val = 1
                         for attr in box.findall("attribute"):
                             aname = attr.get("name", "").lower()
-                            atext = (attr.text or "").strip().lower()
+                            atext = (attr.text or "").strip()
+                            if aname == "id" and not track_id:
+                                track_id = atext
                             if "cross" in aname:
-                                cross_val = 1 if atext in ["1", "true", "yes", "crossing"] else 0
+                                cross_val = 1 if atext.lower() in ["1", "true", "yes", "crossing"] else 0
                             if "action" in aname:
-                                action_val = 1 if "walk" in atext else 0
+                                action_val = 1 if "walk" in atext.lower() else 0
                         cross_flags.append(cross_val)
                         actions.append(action_val)
 
@@ -170,15 +175,15 @@ class PIEAdapter:
                             ped_tracks[track_id or f"ped_{len(ped_tracks)+1}"] = {
                                 "bbox": boxes, "frames": frames, "actions": actions, "cross": cross_flags
                             }
-                        elif label in ["bicycle", "bicyclist", "bike"]:
-                            bike_tracks[track_id or f"bike_{len(bike_tracks)+1}"] = {
-                                "bbox": boxes, "frames": frames, "type": "bicycle"
+                        else:
+                            vehicle_tracks[track_id or f"veh_{len(vehicle_tracks)+1}"] = {
+                                "bbox": boxes, "frames": frames, "type": label
                             }
 
-                if ped_tracks or bike_tracks:
+                if ped_tracks or vehicle_tracks:
                     pie_data[set_id][video_id] = {
                         "ped_annotations": ped_tracks,
-                        "vehicle_annotations": bike_tracks
+                        "vehicle_annotations": vehicle_tracks
                     }
             except Exception:
                 continue
@@ -328,12 +333,12 @@ class PIEAdapter:
                 ped_annotations = video_content.get("ped_annotations", {})
                 vehicle_annotations = video_content.get("vehicle_annotations", {})
 
-                # Find all bicycle tracks in this video
-                bicycle_tracks = {}
+                # Pre-index all candidate neighbors (other pedestrians + all vehicles) by frame number
+                all_candidate_tracks = {}
+                for p_id, p_data in ped_annotations.items():
+                    all_candidate_tracks[p_id] = {f: b for f, b in zip(p_data.get("frames", []), p_data.get("bbox", []))}
                 for v_id, v_data in vehicle_annotations.items():
-                    v_type = v_data.get("type", "vehicle")
-                    if "bike" in v_id.lower() or v_type == "bicycle":
-                        bicycle_tracks[v_id] = v_data
+                    all_candidate_tracks[v_id] = {f: b for f, b in zip(v_data.get("frames", []), v_data.get("bbox", []))}
 
                 # Process each pedestrian track
                 for ped_id, ped_data in ped_annotations.items():
@@ -349,12 +354,17 @@ class PIEAdapter:
                     # Sliding temporal windows
                     for start in range(0, total_len - self.window_size + 1, self.stride):
                         end = start + self.window_size
+                        win_frames = frames[start:end]
+                        # Require temporally contiguous frames
+                        if win_frames[-1] - win_frames[0] != self.window_size - 1:
+                            continue
+
                         win_boxes = boxes[start:end]
                         win_actions = actions[start:end]
                         win_cross = cross_flags[start:end]
 
-                        # Primary agent kinematics: (T, 5)
-                        centers = np.array([[b[0] + b[2]/2.0, b[1] + b[3]/2.0] for b in win_boxes], dtype=np.float32)
+                        # Primary agent kinematics in normalized image space: (T, 5) [x, y, vx, vy, heading]
+                        centers = np.array([[(b[0] + b[2]/2.0) / 1920.0, (b[1] + b[3]/2.0) / 1080.0] for b in win_boxes], dtype=np.float32)
                         primary_kinematics = compute_kinematics(centers, dt=self.dt)
 
                         # Pure human ground-truth labels (zero heuristic derivation)
@@ -364,30 +374,29 @@ class PIEAdapter:
                         # Primary behavior label for multi-class head
                         ped_label = self.map_pie_action_to_taxonomy(win_actions, win_cross, primary_kinematics)
 
-                        # Check interacting neighbors (bicycles / other pedestrians)
+                        # Check interacting neighbors (other pedestrians and vehicles) contemporaneous in win_frames
                         neighbor_trajs = np.zeros((self.window_size, 4, 5), dtype=np.float32)
                         neighbor_mask = np.zeros((self.window_size, 4), dtype=bool)
                         inter_label = INTER_TO_IDX["Cooperative"]
                         micro_label = MICRO_TO_IDX["Moving"]
 
-                        n_idx = 0
-                        # 1. Nearby bicycles
-                        for bike_id, b_data in bicycle_tracks.items():
-                            if n_idx >= 4:
-                                break
-                            b_boxes = b_data.get("bbox", [])
-                            if len(b_boxes) >= end:
-                                b_win = b_boxes[start:end]
-                                b_centers = np.array([[b[0] + b[2]/2.0, b[1] + b[3]/2.0] for b in b_win], dtype=np.float32)
-                                b_kin = compute_kinematics(b_centers, dt=self.dt)
-                                edge_feats = compute_edge_features(primary_kinematics, b_kin)
+                        candidate_neighbors = []
+                        for other_id, other_frame_dict in all_candidate_tracks.items():
+                            if other_id == ped_id:
+                                continue
+                            if all(f in other_frame_dict for f in win_frames):
+                                c_win_boxes = [other_frame_dict[f] for f in win_frames]
+                                c_centers = np.array([[(b[0] + b[2]/2.0) / 1920.0, (b[1] + b[3]/2.0) / 1080.0] for b in c_win_boxes], dtype=np.float32)
+                                mean_dist = float(np.mean(np.linalg.norm(centers - c_centers, axis=-1)))
+                                if mean_dist <= self.distance_threshold:
+                                    candidate_neighbors.append((mean_dist, c_centers))
 
-                                if np.mean(edge_feats[:, 0]) <= self.distance_threshold:
-                                    neighbor_trajs[:, n_idx, :] = b_kin
-                                    neighbor_mask[:, n_idx] = True
-                                    micro_label = self.map_bicycle_action_to_taxonomy(b_kin)
-                                    inter_label = self.infer_interaction_label(primary_kinematics, b_kin, edge_feats)
-                                    n_idx += 1
+                        # Sort by proximity: closest interacting agents first
+                        candidate_neighbors.sort(key=lambda x: x[0])
+                        for n_idx, (mean_d, c_centers) in enumerate(candidate_neighbors[:4]):
+                            b_kin = compute_kinematics(c_centers, dt=self.dt)
+                            neighbor_trajs[:, n_idx, :] = b_kin
+                            neighbor_mask[:, n_idx] = True
 
                         # Synthesize or extract pose and scene features
                         pose_seq = np.zeros((self.window_size, 18, 3), dtype=np.float32)

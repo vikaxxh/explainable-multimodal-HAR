@@ -15,11 +15,50 @@ import unittest
 import numpy as np
 import torch
 
-from preprocessing.trajectory import compute_kinematics, compute_edge_features
+from preprocessing.trajectory import compute_kinematics, compute_edge_features, compute_closing_velocity
 from models.interaction_graph import DynamicInteractionGraph
 
 
 class TestKinematicsAndTTC(unittest.TestCase):
+
+    def test_closing_speed_sign_distinguishes_closing_from_separating(self):
+        """
+        Verify that line-of-sight closing velocity distinguishes closing from separating agents:
+        1. Closing agents (distance decreasing): v_closing > 0.
+        2. Separating agents (distance increasing): v_closing < 0.
+        3. Stationary/lateral agents: v_closing == 0.
+        Essential pre-condition assertion for H4's falsification protocol.
+        """
+        # Pedestrian at (0, 0) stationary
+        p_pos = torch.tensor([[0.0, 0.0]])
+        p_vel = torch.tensor([[0.0, 0.0]])
+
+        # 1. Closing: Neighbor at (10, 0) moving towards ped at vx = -2.0 m/s
+        n_pos_close = torch.tensor([[10.0, 0.0]])
+        n_vel_close = torch.tensor([[-2.0, 0.0]])
+        v_close = DynamicInteractionGraph.compute_closing_velocity(p_pos, p_vel, n_pos_close, n_vel_close).item()
+        assert v_close > 0.0, f"Approaching agent must have positive closing speed, got {v_close}"
+        assert math.isclose(v_close, 2.0, rel_tol=1e-3), f"Expected v_closing=2.0, got {v_close}"
+
+        # 2. Separating: Neighbor at (10, 0) moving away from ped at vx = +3.0 m/s
+        n_pos_sep = torch.tensor([[10.0, 0.0]])
+        n_vel_sep = torch.tensor([[3.0, 0.0]])
+        v_sep = DynamicInteractionGraph.compute_closing_velocity(p_pos, p_vel, n_pos_sep, n_vel_sep).item()
+        assert v_sep < 0.0, f"Separating agent must have negative closing speed, got {v_sep}"
+        assert math.isclose(v_sep, -3.0, rel_tol=1e-3), f"Expected v_closing=-3.0, got {v_sep}"
+
+        # 3. Purely orthogonal motion: Neighbor at (10, 0) moving in y-direction at vy = +4.0 m/s
+        n_vel_ortho = torch.tensor([[0.0, 4.0]])
+        v_ortho = DynamicInteractionGraph.compute_closing_velocity(p_pos, p_vel, n_pos_sep, n_vel_ortho).item()
+        assert math.isclose(v_ortho, 0.0, abs_tol=1e-4), f"Orthogonal motion must have v_closing=0.0, got {v_ortho}"
+
+        # 4. NumPy parity check in preprocessing.trajectory
+        np_close = compute_closing_velocity(np.array([[0.0, 0.0]]), np.array([[0.0, 0.0]]),
+                                            np.array([[10.0, 0.0]]), np.array([[-2.0, 0.0]])).item()
+        np_sep = compute_closing_velocity(np.array([[0.0, 0.0]]), np.array([[0.0, 0.0]]),
+                                          np.array([[10.0, 0.0]]), np.array([[3.0, 0.0]])).item()
+        assert np_close > 0.0 and math.isclose(np_close, 2.0, rel_tol=1e-3)
+        assert np_sep < 0.0 and math.isclose(np_sep, -3.0, rel_tol=1e-3)
 
     def test_closing_agents_ttc(self):
         """Verify that agents closing in on a collision course yield accurate TTC."""
