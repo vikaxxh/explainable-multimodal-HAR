@@ -1,0 +1,44 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Evaluate Proposed X-MIST Model on PIE Set 03 (DGX GPU)
+# ==============================================================================
+#PBS -N emit_eval_pie
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -o eval_pie_set03.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/eval_pie_set03.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "Starting PIE Set 03 Blind Evaluation: $PBS_JOBID on $(hostname) at $(date)"
+echo "Working Directory: $(pwd)"
+echo "=========================================================="
+
+# 1. Load MANIT CUDA module
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+
+# 2. Use direct Python interpreter from emit-har environment
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+if [ ! -f "$PYTHON_BIN" ]; then
+    PYTHON_BIN="$(which python)"
+fi
+echo "Using Python binary: $PYTHON_BIN"
+
+# Verify GPU
+$PYTHON_BIN -c "import torch; print(f'PyTorch: {torch.__version__} | CUDA available: {torch.cuda.is_available()} | Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"None\"}')"
+
+export PYTHONUNBUFFERED=1
+
+# 3. Run evaluation on Set 03 (68,060 sequences)
+$PYTHON_BIN evaluate.py \
+    --checkpoint experiments/checkpoints/pie/checkpoint_best.pt \
+    --data_dir data/processed_pie \
+    --split test
+
+echo "PIE Set 03 evaluation completed successfully at $(date)"
