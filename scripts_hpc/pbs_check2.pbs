@@ -1,0 +1,13 @@
+#!/bin/bash
+#PBS -N check2_shuffled
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -o check2_shuffled.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+$HOME/.conda/envs/emit-har/bin/python run_check2_shuffled.py
