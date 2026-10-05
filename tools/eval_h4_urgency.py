@@ -121,7 +121,10 @@ def evaluate_h4(
                     batch_pert["neighbor_agents"][:, :, top_k, 2:4] = batch_pert["neighbor_agents"][:, :, top_k, 2:4] * alpha
 
                     out = model(batch_pert)
-                    p_cr = float(torch.softmax(out["crossing_logits"], dim=-1)[0, 1].cpu().item())
+                    if getattr(model, "_use_ped_head_fallback", False):
+                        p_cr = float(torch.softmax(out["ped_logits"], dim=-1)[0, 5].cpu().item())
+                    else:
+                        p_cr = float(torch.softmax(out["crossing_logits"], dim=-1)[0, 1].cpu().item())
                     probs_alpha.append(p_cr)
 
                 # Compute Spearman rank correlation rho(alpha, p_cross)
@@ -141,7 +144,10 @@ def evaluate_h4(
                     batch_p_alpha = {k: (v.clone() if torch.is_tensor(v) else v) for k, v in batch_placebo.items()}
                     batch_p_alpha["neighbor_agents"][:, :, top_k, 2:4] *= alpha
                     out_p = model(batch_p_alpha)
-                    p_cr_p = float(torch.softmax(out_p["crossing_logits"], dim=-1)[0, 1].cpu().item())
+                    if getattr(model, "_use_ped_head_fallback", False):
+                        p_cr_p = float(torch.softmax(out_p["ped_logits"], dim=-1)[0, 5].cpu().item())
+                    else:
+                        p_cr_p = float(torch.softmax(out_p["crossing_logits"], dim=-1)[0, 1].cpu().item())
                     probs_placebo.append(p_cr_p)
 
                 if len(set(probs_placebo)) > 1:
@@ -257,7 +263,15 @@ def main():
 
     state_dict = ckpt["model_state_dict"]
     clean_state = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    model.load_state_dict(clean_state)
+    load_res = model.load_state_dict(clean_state, strict=False)
+    has_crossing_head = any(k.startswith("crossing_head") for k in clean_state.keys())
+    if not has_crossing_head:
+        print("[Notice] Checkpoint does not contain 'crossing_head'; using pedestrian behavior Class 5 ('Crossing') logits.")
+        model._use_ped_head_fallback = True
+    else:
+        model._use_ped_head_fallback = False
+    if load_res.missing_keys:
+        print(f"[Model Loader] Loaded with {len(load_res.missing_keys)} missing optional keys (e.g. auxiliary heads).")
 
     dataset = MultimodalSequenceDataset(
         data_dir=args.data_dir,

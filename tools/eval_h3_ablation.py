@@ -74,8 +74,12 @@ def make_batches_and_predict(model: torch.nn.Module, loader: DataLoader, device:
             raw["neighbor_agents"] = raw["neighbor_agents"] * m[..., None]
 
         out = model(raw)
-        lg = out["crossing_logits"] # (B, 2)
-        probs = torch.softmax(lg, dim=-1)[:, 1].cpu().numpy()
+        if getattr(model, "_use_ped_head_fallback", False):
+            # Checkpoint was trained on 8-class pedestrian behavior (Class 5 = Crossing)
+            probs = torch.softmax(out["ped_logits"], dim=-1)[:, 5].cpu().numpy()
+        else:
+            lg = out["crossing_logits"]  # (B, 2)
+            probs = torch.softmax(lg, dim=-1)[:, 1].cpu().numpy()
         
         attn_w = out.get("interaction_weights")
         if attn_w is None:
@@ -353,7 +357,15 @@ def main():
 
     state_dict = ckpt["model_state_dict"]
     clean_state = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    model.load_state_dict(clean_state)
+    load_res = model.load_state_dict(clean_state, strict=False)
+    has_crossing_head = any(k.startswith("crossing_head") for k in clean_state.keys())
+    if not has_crossing_head:
+        print("[Notice] Checkpoint does not contain 'crossing_head'; using pedestrian behavior Class 5 ('Crossing') logits.")
+        model._use_ped_head_fallback = True
+    else:
+        model._use_ped_head_fallback = False
+    if load_res.missing_keys:
+        print(f"[Model Loader] Loaded with {len(load_res.missing_keys)} missing optional keys (e.g. auxiliary heads).")
 
     dataset = MultimodalSequenceDataset(
         data_dir=args.data_dir,

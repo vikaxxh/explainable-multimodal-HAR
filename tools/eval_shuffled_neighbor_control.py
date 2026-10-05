@@ -53,7 +53,10 @@ def run_shuffled_neighbor_control(
 
             batch_intact = {k: v.to(device) if torch.is_tensor(v) else v for k, v in batch.items()}
             out_intact = model(batch_intact)
-            p_int = F.softmax(out_intact["crossing_logits"], dim=-1)[:, 1].cpu().numpy()
+            if getattr(model, "_use_ped_head_fallback", False):
+                p_int = F.softmax(out_intact["ped_logits"], dim=-1)[:, 5].cpu().numpy()
+            else:
+                p_int = F.softmax(out_intact["crossing_logits"], dim=-1)[:, 1].cpu().numpy()
 
             # Create shuffled neighbor control: permute neighbor tensors across unrelated samples in batch
             perm = rng.permutation(B)
@@ -66,7 +69,10 @@ def run_shuffled_neighbor_control(
             batch_shuffled["neighbor_mask"] = batch_shuffled["neighbor_mask"][perm]
 
             out_shuf = model(batch_shuffled)
-            p_shuf = F.softmax(out_shuf["crossing_logits"], dim=-1)[:, 1].cpu().numpy()
+            if getattr(model, "_use_ped_head_fallback", False):
+                p_shuf = F.softmax(out_shuf["ped_logits"], dim=-1)[:, 5].cpu().numpy()
+            else:
+                p_shuf = F.softmax(out_shuf["crossing_logits"], dim=-1)[:, 1].cpu().numpy()
 
             targets = batch["cross"].cpu().numpy()
             y_true.extend(targets.tolist())
@@ -143,7 +149,15 @@ def main():
 
     state_dict = ckpt["model_state_dict"]
     clean_state = {k.replace("module.", ""): v for k, v in state_dict.items()}
-    model.load_state_dict(clean_state)
+    load_res = model.load_state_dict(clean_state, strict=False)
+    has_crossing_head = any(k.startswith("crossing_head") for k in clean_state.keys())
+    if not has_crossing_head:
+        print("[Notice] Checkpoint does not contain 'crossing_head'; using pedestrian behavior Class 5 ('Crossing') logits.")
+        model._use_ped_head_fallback = True
+    else:
+        model._use_ped_head_fallback = False
+    if load_res.missing_keys:
+        print(f"[Model Loader] Loaded with {len(load_res.missing_keys)} missing optional keys (e.g. auxiliary heads).")
 
     dataset = MultimodalSequenceDataset(
         data_dir=args.data_dir,

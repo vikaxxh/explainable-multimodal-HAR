@@ -24,9 +24,12 @@ PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
 export PYTHONUNBUFFERED=1
 
 # Checkpoint to evaluate (Epoch 21)
-CKPT="experiments/checkpoints/checkpoint_best.pt"
-if [ ! -f "$CKPT" ]; then
+if [ -f "experiments/checkpoints/pie/checkpoint_best.pt" ]; then
     CKPT="experiments/checkpoints/pie/checkpoint_best.pt"
+elif [ -f "experiments/checkpoints/checkpoint_best.pt" ]; then
+    CKPT="experiments/checkpoints/checkpoint_best.pt"
+else
+    CKPT="experiments/checkpoints/pie/checkpoint_latest.pt"
 fi
 
 echo "Evaluating checkpoint: $CKPT"
