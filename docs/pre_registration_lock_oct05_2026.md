@@ -75,12 +75,13 @@ All inferential tests are evaluated on held-out **Set 03 (68,060 sequences acros
 
 * **Hypothesis H3 (Counterfactual Attribution Faithfulness)**:
   * For each frame where top-attended neighbor $N_1$ exists, identify candidate control neighbor $N_{\text{ctrl}}$ matched within:
-    * Distance: $\pm 15\%$
-    * Relative Speed: $\pm 20\%$
-    * Relative Heading: $\pm 30^\circ$
-  * Compute attribution difference $\delta_{i,t} = A(N_1) - A(N_{\text{ctrl}})$, aggregated to track medians $\bar{\delta}_i$.
-  * **Pass Condition**: Paired Wilcoxon signed-rank test across 719 tracks yields $p_{\text{Holm}} < 0.05$ with $\text{median}(\bar{\delta}_i) > 0$.
-  * **Fail Condition**: If $p \ge 0.05$, attention is declared **Unfaithful** (driven by spatial proximity rather than interactive priority).
+    * Primary Analysis Tolerances (Locked): Distance $\pm 15\%$, Relative Speed $\pm 20\%$, Heading $\pm 30^\circ$ (Speed floor $0.002$).
+    * Pre-Specified Sensitivity Ladder: Secondary looser tolerances: Distance $\pm 25\%$, Relative Speed $\pm 30\%$, Heading $\pm 45^\circ$. Reported alongside primary to evaluate tolerance sensitivity.
+    * Covariate-Adjusted Robustness Analysis: On all eligible windows ($K \ge 2$, $N \approx 12,000$), regress displacement $\Delta P$ on distance, speed, relative heading, and neighbor count, testing whether top-attended neighbor displacement exceeds regression prediction without hard matching restrictions.
+    * Coverage Disclosure: The primary analysis applies strictly to the matched subset; coverage (windows and unique tracks represented) is reported transparently alongside all effect sizes.
+  * Compute causal displacement difference per sample: $\delta = |\Delta P(N_1)| - |\Delta P(N_{\text{ctrl}})|$, aggregated to track medians $\bar{\delta}_i$.
+  * **Pass Condition**: Paired Wilcoxon signed-rank test across test tracks yields $p_{\text{Holm}} < 0.05$ with $\text{median}(\bar{\delta}_i) > 0$ and $95\%$ bootstrap CI strictly excluding zero.
+  * **Fail Condition**: If $p \ge 0.05$ or CI includes zero, attention is declared **Unfaithful / Dormant** (driven by spatial proximity rather than interactive priority).
 
 * **Hypothesis H4 (Kinematic Urgency Concordance)**:
   * Scale relative closing velocity $v_{\text{closing}} = -\vec{v}_{\text{rel}} \cdot \vec{u}_{\text{rel}}$ across 11-point grid:
