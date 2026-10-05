@@ -93,7 +93,7 @@ data:
 # ------------------------------------------------------------------------------
 model:
   feature_dim: 256          # Common projection dimension d for all modalities
-  dropout: 0.1
+  dropout: 0.3              # Regularization against overfitting on 880 training tracks
 
   # Phase 12: Individual Modality Encoders
   rgb_encoder:
@@ -158,13 +158,14 @@ training:
   num_workers: 4
   lr: 0.0001
   min_lr: 1.0e-6
-  weight_decay: 0.0001
+  weight_decay: 0.01        # Stronger L2 regularization
   warmup_epochs: 5
   grad_clip: 1.0
   mixed_precision: "fp16"   # Options: "no", "fp16", "bf16"
   save_every: 5
   eval_every: 1
-  early_stop_patience: 12
+  early_stop_patience: 8    # Stop if val_auc does not improve for 8 epochs
+  early_stop_metric: "val_auc" # Monitor validation crossing ROC-AUC (not accuracy or loss)
 
   # Phase 19 & 23: Multi-task Loss Weights
   loss_weights:

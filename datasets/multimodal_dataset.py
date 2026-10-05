@@ -78,6 +78,21 @@ class MultimodalSequenceDataset(Dataset):
                     cross_lbl = int(data["cross"]) if "cross" in data else (1 if ped_lbl == 5 else 0)
                     action_lbl = int(data["action"]) if "action" in data else (1 if ped_lbl in [0, 5] else 0)
 
+                    # Extract authentic composite track ID
+                    track_id = None
+                    if "metadata" in data:
+                        m = data["metadata"].item() if hasattr(data["metadata"], "item") else data["metadata"]
+                        if isinstance(m, dict) and "ped_id" in m:
+                            s_id = m.get("set_id", "")
+                            v_id = m.get("video_id", "")
+                            p_id = m.get("ped_id", "")
+                            track_id = f"{s_id}_{v_id}_{p_id}" if (s_id or v_id) else str(p_id)
+                    if not track_id and "ped_id" in data:
+                        track_id = str(data["ped_id"])
+
+                    if not track_id or track_id == "":
+                        raise KeyError(f"Fatal: Sequence file {file_path} missing authentic 'metadata.ped_id' or 'ped_id'. Cannot evaluate without real track clustering.")
+
                     return {
                         "rgb": rgb_tensor,
                         "pose": torch.from_numpy(data["pose"]).float(),
@@ -89,7 +104,8 @@ class MultimodalSequenceDataset(Dataset):
                         "action": torch.tensor(action_lbl, dtype=torch.long),
                         "ped_label": torch.tensor(ped_lbl, dtype=torch.long),
                         "micro_label": torch.tensor(int(data["micro_label"]), dtype=torch.long),
-                        "inter_label": torch.tensor(int(data["inter_label"]), dtype=torch.long)
+                        "inter_label": torch.tensor(int(data["inter_label"]), dtype=torch.long),
+                        "track_id": track_id
                     }
             else:
                 return torch.load(file_path)
@@ -101,11 +117,14 @@ class MultimodalSequenceDataset(Dataset):
             return self.__getitem__(alt_idx)
 
 
-def collate_multimodal_batch(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
+def collate_multimodal_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Standard batch collator stacking tensors across batch dimension.
+    Standard batch collator stacking tensors across batch dimension and preserving lists for non-tensors.
     """
     collated = {}
     for key in batch[0].keys():
-        collated[key] = torch.stack([item[key] for item in batch], dim=0)
+        if isinstance(batch[0][key], torch.Tensor):
+            collated[key] = torch.stack([item[key] for item in batch], dim=0)
+        else:
+            collated[key] = [item[key] for item in batch]
     return collated

@@ -22,16 +22,25 @@ class DynamicInteractionGraph(nn.Module):
         self,
         edge_dim: int = 4,
         edge_embed_dim: int = 64,
-        distance_threshold: float = 12.0
+        distance_threshold: float = 12.0,
+        edge_mode: str = "full"
     ):
         super().__init__()
-        self.edge_dim = edge_dim
-        self.edge_embed_dim = edge_embed_dim
+        self.edge_mode = edge_mode
         self.distance_threshold = distance_threshold
+        self.edge_embed_dim = edge_embed_dim
 
-        # Edge feature MLP: projects [dist, delta_v, delta_heading, ttc] to edge_embed_dim
+        if edge_mode == "proximity_only":
+            actual_dim = 1
+        elif edge_mode == "urgency_aware":
+            actual_dim = 3
+        else:
+            actual_dim = edge_dim
+
+        self.edge_dim = actual_dim
+        # Edge feature MLP: projects edge features to edge_embed_dim
         self.edge_mlp = nn.Sequential(
-            nn.Linear(edge_dim, edge_embed_dim),
+            nn.Linear(self.edge_dim, edge_embed_dim),
             nn.ReLU(inplace=True),
             nn.Linear(edge_embed_dim, edge_embed_dim)
         )
@@ -87,8 +96,13 @@ class DynamicInteractionGraph(nn.Module):
         ttc = torch.where(closing_speed > 0.1, dist / (torch.clamp(closing_speed, min=1e-3) + eps), torch.tensor(10.0, device=dist.device))
         ttc = torch.clamp(ttc, 0.0, 10.0)                # (B, T, N, 1)
 
-        # Combined edge features
-        edge_feats = torch.cat([dist, delta_v, delta_theta, ttc], dim=-1) # (B, T, N, 4)
+        # Edge feature construction based on edge_mode
+        if self.edge_mode == "proximity_only":
+            edge_feats = dist  # (B, T, N, 1) Distance only
+        elif self.edge_mode == "urgency_aware":
+            edge_feats = torch.cat([dist, closing_speed, ttc], dim=-1)  # (B, T, N, 3) Closing kinematics & TTC
+        else:
+            edge_feats = torch.cat([dist, delta_v, delta_theta, ttc], dim=-1)  # (B, T, N, 4) Full relational features
         edge_feats = torch.nan_to_num(edge_feats, nan=0.0, posinf=10.0, neginf=0.0)
 
         # Connectivity mask: must be within threshold and marked active in neighbor_mask

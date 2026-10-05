@@ -18,8 +18,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 from typing import Dict, Any, Optional
 
 from training.losses import MultiTaskBehaviorLoss
-
-
+from evaluation.classification_metrics import compute_crossing_intention_metrics
 from preprocessing.augmentation import MultimodalAugmentor
 
 
@@ -54,6 +53,13 @@ class Trainer:
         self.grad_clip = float(cfg_train.get("grad_clip", 1.0))
         self.mixed_precision = str(cfg_train.get("mixed_precision", "fp16"))
         self.checkpoint_dir = config.get("project", {}).get("checkpoint_dir", "experiments/checkpoints")
+
+        # Early stopping & checkpoint metric selection (Phase 2 audit against overfitting)
+        self.early_stop_patience = int(cfg_train.get("early_stop_patience", 8))
+        self.early_stop_metric = str(cfg_train.get("early_stop_metric", "val_auc"))
+        self.is_maximize = any(m in self.early_stop_metric for m in ["auc", "f1", "acc"])
+        self.best_metric_val = -float("inf") if self.is_maximize else float("inf")
+        self.patience_counter = 0
 
         if self.rank == 0:
             os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -151,7 +157,9 @@ class Trainer:
         total_loss = 0.0
         num_batches = len(self.val_loader)
         correct_ped, total_ped = 0, 0
-        correct_cross, total_cross = 0, 0
+        all_cross_probs = []
+        all_cross_preds = []
+        all_cross_true = []
 
         amp_enabled = (self.mixed_precision in ["fp16", "bf16"] and self.device.type == "cuda")
         try:
@@ -169,9 +177,13 @@ class Trainer:
             total_loss += loss.item()
 
             if "crossing_logits" in outputs and "cross" in batch:
-                c_preds = torch.argmax(outputs["crossing_logits"], dim=-1)
-                correct_cross += (c_preds == batch["cross"]).sum().item()
-                total_cross += batch["cross"].size(0)
+                lg = outputs["crossing_logits"]
+                probs = torch.softmax(lg, dim=-1)[:, 1].cpu().numpy().tolist()
+                preds = torch.argmax(lg, dim=-1).cpu().numpy().tolist()
+                true_lbls = batch["cross"].cpu().numpy().tolist()
+                all_cross_probs.extend(probs)
+                all_cross_preds.extend(preds)
+                all_cross_true.extend(true_lbls)
 
             if "ped_logits" in outputs and "ped_label" in batch:
                 preds = torch.argmax(outputs["ped_logits"], dim=-1)
@@ -181,8 +193,15 @@ class Trainer:
         avg_loss = total_loss / max(1, num_batches)
         ped_accuracy = (correct_ped / max(1, total_ped)) * 100.0
         res = {"val_loss": avg_loss, "val_acc_ped": ped_accuracy}
-        if total_cross > 0:
-            res["val_acc_cross"] = (correct_cross / total_cross) * 100.0
+
+        if len(all_cross_true) > 0:
+            c_metrics = compute_crossing_intention_metrics(all_cross_true, all_cross_probs, all_cross_preds)
+            res["val_acc_cross"] = c_metrics["accuracy"]
+            res["val_auc"] = c_metrics["auc"]
+            res["val_f1_cross"] = c_metrics["f1"]
+            res["val_precision"] = c_metrics["precision"]
+            res["val_recall"] = c_metrics["recall"]
+
         return res
 
     def save_checkpoint(self, epoch: int, is_best: bool = False):
@@ -196,6 +215,8 @@ class Trainer:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": self.scheduler.state_dict(),
             "best_val_loss": self.best_val_loss,
+            "best_metric_val": self.best_metric_val,
+            "early_stop_metric": self.early_stop_metric,
             "config": self.config
         }
 
@@ -205,7 +226,7 @@ class Trainer:
         if is_best:
             best_path = os.path.join(self.checkpoint_dir, "checkpoint_best.pt")
             torch.save(checkpoint, best_path)
-            print(f"[Trainer] Epoch {epoch}: Saved new best model checkpoint to {best_path}")
+            print(f"[Trainer] Epoch {epoch+1}: Saved new best model checkpoint to {best_path} ({self.early_stop_metric}: {self.best_metric_val:.2f})")
 
     def load_checkpoint(self, checkpoint_path: str, override_lr: Optional[float] = None):
         if not os.path.exists(checkpoint_path):
@@ -243,9 +264,10 @@ class Trainer:
             print(f"[Trainer] Resumed checkpoint from {checkpoint_path} at epoch {self.start_epoch}")
 
     def fit(self):
-        """Runs complete training and validation cycle across epochs."""
+        """Runs complete training and validation cycle across epochs with early stopping."""
         if self.rank == 0:
             print(f"[Trainer] Starting training for {self.epochs} epochs on device: {self.device}")
+            print(f"[Trainer] Early stopping enabled: metric='{self.early_stop_metric}', patience={self.early_stop_patience}")
 
         for epoch in range(self.start_epoch, self.epochs):
             t0 = time.time()
@@ -257,18 +279,34 @@ class Trainer:
             self.scheduler.step()
             duration = time.time() - t0
 
-            is_best = val_metrics["val_loss"] < self.best_val_loss
+            # Check improvement based on early_stop_metric
+            current_metric = val_metrics.get(self.early_stop_metric, val_metrics["val_loss"])
+            if self.is_maximize:
+                is_best = current_metric > self.best_metric_val
+            else:
+                is_best = current_metric < self.best_metric_val
+
             if is_best:
-                self.best_val_loss = val_metrics["val_loss"]
+                self.best_metric_val = current_metric
+                self.patience_counter = 0
+            else:
+                self.patience_counter += 1
 
             self.save_checkpoint(epoch, is_best=is_best)
 
             if self.rank == 0:
                 tr_cross = f" | Cross Acc: {train_metrics['train_acc_cross']:.1f}%" if "train_acc_cross" in train_metrics else ""
-                val_cross = f" | Val Cross Acc: {val_metrics['val_acc_cross']:.1f}%" if "val_acc_cross" in val_metrics else ""
+                auc_str = f" | Val AUC: {val_metrics['val_auc']:.2f}% (F1: {val_metrics['val_f1_cross']:.2f}%)" if "val_auc" in val_metrics else ""
                 print(
                     f"Epoch [{epoch+1:02d}/{self.epochs:02d}] "
                     f"Train Loss: {train_metrics['train_loss']:.4f}{tr_cross} (Ped: {train_metrics['train_acc_ped']:.1f}%) | "
-                    f"Val Loss: {val_metrics['val_loss']:.4f}{val_cross} (Ped: {val_metrics['val_acc_ped']:.1f}%) | "
+                    f"Val Loss: {val_metrics['val_loss']:.4f}{auc_str} | "
+                    f"Best {self.early_stop_metric}: {self.best_metric_val:.2f} (Patience: {self.patience_counter}/{self.early_stop_patience}) | "
                     f"Time: {duration:.1f}s"
                 )
+
+            if self.patience_counter >= self.early_stop_patience:
+                if self.rank == 0:
+                    print(f"\n[Trainer] Early stopping triggered at epoch {epoch+1}. Metric '{self.early_stop_metric}' did not improve for {self.early_stop_patience} consecutive epochs.")
+                    print(f"[Trainer] Best model checkpoint preserved with {self.early_stop_metric} = {self.best_metric_val:.2f}")
+                break

@@ -51,6 +51,7 @@ class ProposedXMISTModel(nn.Module):
         use_cross_modal: bool = True,
         use_interaction: bool = True,
         use_modality_gating: bool = True,
+        edge_mode: str = "full",
         num_ped_classes: int = len(PEDESTRIAN_CLASSES),
         num_micro_classes: int = len(MICROMOBILITY_CLASSES),
         num_inter_classes: int = len(INTERACTION_CLASSES),
@@ -65,6 +66,7 @@ class ProposedXMISTModel(nn.Module):
         self.use_cross_modal = use_cross_modal
         self.use_interaction = use_interaction
         self.use_modality_gating = use_modality_gating
+        self.edge_mode = edge_mode
 
         # 1. Modality Encoders
         if use_rgb:
@@ -88,7 +90,7 @@ class ProposedXMISTModel(nn.Module):
 
         # 4. Dynamic Interaction Graph & Transformer
         if use_interaction:
-            self.interaction_graph = DynamicInteractionGraph(edge_dim=4, edge_embed_dim=64, distance_threshold=12.0)
+            self.interaction_graph = DynamicInteractionGraph(edge_dim=4, edge_embed_dim=64, distance_threshold=12.0, edge_mode=edge_mode)
             self.interaction_transformer = DynamicInteractionTransformer(feature_dim=feature_dim, edge_embed_dim=64, dropout=dropout)
 
         # 5. Spatio-Temporal Sequence Transformer
@@ -136,14 +138,23 @@ class ProposedXMISTModel(nn.Module):
         f_fused = f_multi
 
         if self.use_interaction and "neighbor_agents" in batch and "neighbor_mask" in batch:
+            p_traj = batch["trajectory"]
+            n_traj = batch["neighbor_agents"]
+            if self.edge_mode == "proximity_only":
+                # Strip velocity from nodes and edges to enforce pure spatial proximity control
+                p_traj = p_traj.clone()
+                p_traj[..., 2:4] = 0.0
+                n_traj = n_traj.clone()
+                n_traj[..., 2:4] = 0.0
+
             edge_feats, edge_embed, adj_mask = self.interaction_graph.compute_relational_edges(
-                primary_traj=batch["trajectory"],
-                neighbor_trajs=batch["neighbor_agents"],
+                primary_traj=p_traj,
+                neighbor_trajs=n_traj,
                 neighbor_mask=batch["neighbor_mask"]
             )
             f_fused, f_interaction, interaction_weights = self.interaction_transformer(
                 f_multi=f_multi,
-                neighbor_trajs=batch["neighbor_agents"],
+                neighbor_trajs=n_traj,
                 edge_embed=edge_embed,
                 adj_mask=adj_mask
             )

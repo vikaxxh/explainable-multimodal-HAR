@@ -65,6 +65,8 @@ sshkey/
 data/processed/**/*.npz
 data/processed/**/*.pt
 !data/processed/**/.gitkeep
+data/processed_pie/
+data/processed_pie_test/
 
 # Experiment logs and generated outputs
 experiments/logs/*

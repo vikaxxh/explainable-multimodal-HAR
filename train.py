@@ -39,7 +39,7 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train X-MIST / EMIT-HAR Models")
     parser.add_argument("--config", type=str, default="configs/config.yaml", help="Path to config file")
     parser.add_argument("--model", type=str, default="proposed",
-                        choices=["proposed", "baseline_rgb", "baseline_traj", "baseline_pose", "intentformer"],
+                        choices=["proposed", "isolated", "proximity_only", "urgency_aware", "baseline_rgb", "baseline_traj", "baseline_pose", "intentformer"],
                         help="Model architecture variant")
     parser.add_argument("--data_dir", type=str, default="data/processed", help="Path to processed sequences")
     parser.add_argument("--epochs", type=int, default=None, help="Override number of epochs")
@@ -73,8 +73,19 @@ def init_distributed():
 
 def build_model(model_type: str, config: dict, device: torch.device) -> torch.nn.Module:
     feat_dim = config.get("model", {}).get("feature_dim", 256)
+    dropout = config.get("model", {}).get("dropout", 0.1)
+
     if model_type == "proposed":
-        model = ProposedXMISTModel(feature_dim=feat_dim)
+        model = ProposedXMISTModel(feature_dim=feat_dim, dropout=dropout)
+    elif model_type == "isolated":
+        # Fair isolated baseline: identical architecture, with interaction branch disabled
+        model = ProposedXMISTModel(feature_dim=feat_dim, use_interaction=False, dropout=dropout)
+    elif model_type == "proximity_only":
+        # Proximity-only variant: distance-only edges, velocity stripped from nodes & edges
+        model = ProposedXMISTModel(feature_dim=feat_dim, edge_mode="proximity_only", dropout=dropout)
+    elif model_type == "urgency_aware":
+        # Urgency-aware variant: closing velocity and TTC edges
+        model = ProposedXMISTModel(feature_dim=feat_dim, edge_mode="urgency_aware", dropout=dropout)
     elif model_type == "baseline_rgb":
         model = RGBBaselineModel(feature_dim=feat_dim)
     elif model_type == "baseline_traj":
