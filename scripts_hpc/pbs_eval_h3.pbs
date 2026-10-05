@@ -1,0 +1,51 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Evaluate Hypothesis H3 Causal Attribution on DGX GPU
+# ==============================================================================
+#PBS -N emit_h3_eval
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -o eval_h3_audit.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/eval_h3_audit.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "Starting H3 Causal Attribution Audit: $PBS_JOBID on $(hostname) at $(date)"
+echo "=========================================================="
+
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+export PYTHONUNBUFFERED=1
+
+# Checkpoint to evaluate (Epoch 21)
+CKPT="experiments/checkpoints/checkpoint_best.pt"
+if [ ! -f "$CKPT" ]; then
+    CKPT="experiments/checkpoints/pie/checkpoint_best.pt"
+fi
+
+echo "Evaluating checkpoint: $CKPT"
+
+# 1. Placebo Negative Control
+echo -e "\n>>> RUNNING PLACEBO CONTROL (UNIFORM RANDOM SELECTION) <<<"
+$PYTHON_BIN tools/eval_h3_ablation.py \
+    --checkpoint "$CKPT" \
+    --split val \
+    --selection random \
+    --speed_floor 0.002 \
+    --seed 42
+
+# 2. Causal Attribution Test
+echo -e "\n>>> RUNNING ATTRIBUTION FAITHFULNESS (ATTENTION-TOP SELECTION) <<<"
+$PYTHON_BIN tools/eval_h3_ablation.py \
+    --checkpoint "$CKPT" \
+    --split val \
+    --selection attention \
+    --speed_floor 0.002
+
+echo "H3 evaluation completed at $(date)"

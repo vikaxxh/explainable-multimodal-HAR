@@ -1,0 +1,34 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Train Regularized Proposed Model (Early Stopping on Val AUC)
+# ==============================================================================
+#PBS -N emit_reg_train
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -o train_reg_proposed.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/train_reg_proposed.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "Starting Regularized Proposed Model Training: $PBS_JOBID on $(hostname) at $(date)"
+echo "=========================================================="
+
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+export PYTHONUNBUFFERED=1
+
+$PYTHON_BIN train.py \
+    --model proposed \
+    --data_dir data/processed_pie \
+    --epochs 50 \
+    --batch_size 16 \
+    --seed 42 \
+    --checkpoint_dir experiments/checkpoints/proposed_seed42
+
+echo "Training completed at $(date)"
