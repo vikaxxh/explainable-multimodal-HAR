@@ -6,6 +6,11 @@ over 100 iterations to pinpoint the exact binding bottleneck in training through
 """
 
 import os
+import sys
+
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import time
 import argparse
 import numpy as np

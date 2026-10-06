@@ -10,6 +10,10 @@ Executes 4 precise checks on the isolated baseline:
 
 import os
 import sys
+
+# Ensure project root is in sys.path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import torch
 import numpy as np
 import yaml
