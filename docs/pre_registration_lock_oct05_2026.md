@@ -164,28 +164,35 @@ We pre-commit to publishing whichever outcome is observed without shifting crite
 
 ---
 
-## 7. Addendum 1 (Locked October 6, 2026): Regularized Training Checkpoint Selection & Plateau-Smoothed Rule
+## 7. Addendum 1 (Documented October 6, 2026; Post-Hoc to Proposed Training)
 
-Following the empirical completion of the regularized training run (`weight_decay=0.01`, `dropout=0.3`, Early Stopping on `val_auc` with patience 8), we formalize the following selection protocol prior to any inference on the held-out test split:
+**Timing & Epistemic Status**:
+This addendum was documented on October 6, 2026, after observing the proposed model's validation training progression (Epochs 1–33, where validation AUC peaked at Epoch 26 and plateaued around 86–87%), but prior to the completion of the isolated baseline and prior to any evaluation on test Set 03. It is therefore **post-hoc** with respect to the proposed model's training trajectory, but prospective with respect to the isolated baseline run and the quarantined test set.
 
-1. **Dual Checkpoint Reporting Rule**:
-   * **Primary Checkpoint**: The best single-epoch checkpoint selected strictly by Early Stopping on `val_auc` (Epoch 26, `87.57%` Val AUC, preserved at `experiments/checkpoints/proposed_seed42/checkpoint_best.pt`).
-   * **Plateau-Smoothed Anchor**: To counter single-epoch "spike-picking" luck, we pre-specify a 3-epoch moving window centered on the peak (Epochs 25–27: $[82.56\%, 87.57\%, 86.95\%] \to \text{Mean } \mathbf{85.69\%}$ AUC).
-   * **Identical Rule for Isolated Baseline**: The exact same single-epoch best and 3-epoch smoothed window will be applied to the isolated baseline (`experiments/checkpoints/isolated_seed42/checkpoint_best.pt`).
+1. **Checkpoint Selection Rule (Primary vs. Descriptive)**:
+   * **Primary Selection Rule**: The checkpoint evaluated for each model is selected strictly by **maximum single-epoch validation ROC-AUC** (`val_auc`) during training with Early Stopping (patience = 8).
+     - Proposed Model: Epoch 26 (`87.57%` Val AUC, checkpoint at `experiments/checkpoints/proposed_seed42/checkpoint_best.pt`).
+     - Isolated Baseline: Maximum single-epoch `val_auc` under the identical monitor (`experiments/checkpoints/isolated_seed42/checkpoint_best.pt`).
+   * **Descriptive Reporting of the Plateau**: Because the trainer overwrites `checkpoint_best.pt` only on raw improvement, smoothed window selection is not operationalized as a checkpoint save rule. Instead, the plateau mean (e.g., Epochs 27–33 mean $\approx 86.1\%$) and the 3-epoch peak window (Epochs 31–33 mean: $86.64\%$) are recorded strictly as **descriptive reporting metrics** to contextualize the single-epoch peak against epoch-to-epoch noise.
 
-2. **Expanded Metric Reporting Suite**:
-   * To account for class imbalance ($\approx 17.5\%$ crossing in validation), all pilot and confirmatory runs report:
-     - ROC-AUC (Primary discriminative metric)
-     - PR-AUC / Average Precision (Insensitive to majority non-crossing skew)
-     - F1-Score at standard 0.5 decision threshold
+2. **Validation Selection Bias & Pilot Scope**:
+   * Because both models are checkpointed at their peak validation AUC, both validation scores carry positive selection bias (with whichever run has higher epoch-to-epoch variance receiving the larger upward bounce).
+   * Consequently, the validation comparison conducted via [`tools/eval_h2_validation_comparison.py`](file:///home/vikash/Desktop/research%20Implementation/tools/eval_h2_validation_comparison.py) is strictly an **exploratory pilot**.
+   * The **confirmatory test of H2** remains the single blind evaluation of frozen checkpoints on held-out test Set 03.
+
+3. **Recipe Symmetry Verification**:
+   * The two training scripts (`pbs_train_regularized.pbs` vs. `pbs_train_isolated.pbs`) differ strictly in `--model proposed` vs. `--model isolated` and output checkpoint paths.
+   * Both share identical seed (42), batch size (16), learning rate ($10^{-4}$), weight decay ($10^{-2}$), dropout ($0.3$), patience (8), and early stopping monitor (`val_auc`).
+
+4. **Expanded Metric Suite**:
+   * To account for class imbalance without arbitrary threshold sensitivity, both runs report:
+     - ROC-AUC (Primary ranking metric)
+     - PR-AUC / Average Precision (Precision-Recall curve area)
+     - F1-Score at default $\tau = 0.5$
      - Fixed-threshold Recall ($\tau \in \{0.3, 0.5, 0.7\}$)
      - Brier Score (Probabilistic calibration error)
 
-3. **Pre-Registered H2 Validation Audit Tool**:
-   * Evaluated via [`tools/eval_h2_validation_comparison.py`](file:///home/vikash/Desktop/research%20Implementation/tools/eval_h2_validation_comparison.py) executing 1,000 paired, track-clustered bootstrap resamples across the 239 validation pedestrian tracks.
-   * All per-window predictions are permanently saved to `experiments/results/val_h2_comparison_seed42.npz` for open-science reproducibility.
-
 ---
 
-*This document represents the immutable pre-registration audit for the research project conducted by Vikash Paigamber at Maulana Azad National Institute of Technology (MANIT), Bhopal. Locked on October 5, 2026. Addendum 1 locked on October 6, 2026.*
+*This document represents the audited protocol commitment for the research project conducted by Vikash Paigamber at Maulana Azad National Institute of Technology (MANIT), Bhopal. Original protocol locked on October 5, 2026; Addendum 1 documented on October 6, 2026.*
 
