@@ -142,9 +142,10 @@ def compute_crossing_intention_metrics(
 ) -> Dict[str, Any]:
     """
     Computes rigorous crossing intention benchmark metrics matching official PIE/JAAD standards:
-    - Accuracy, ROC-AUC, F1-Score, Precision, Recall.
+    - Accuracy, ROC-AUC, PR-AUC (Average Precision), F1-Score, Precision, Recall, Brier Score,
+      and Recall at fixed probability thresholds (0.3, 0.5, 0.7).
     """
-    from sklearn.metrics import roc_auc_score
+    from sklearn.metrics import roc_auc_score, average_precision_score, brier_score_loss
 
     y_t = np.asarray(y_true, dtype=int)
     y_pr = np.asarray(y_probs, dtype=float)
@@ -155,26 +156,50 @@ def compute_crossing_intention_metrics(
         y_p = np.asarray(y_pred, dtype=int)
 
     if len(y_t) == 0:
-        return {"accuracy": 0.0, "auc": 0.0, "f1": 0.0, "precision": 0.0, "recall": 0.0, "crossing_count": 0, "non_crossing_count": 0}
+        return {
+            "accuracy": 0.0, "auc": 0.0, "pr_auc": 0.0, "f1": 0.0,
+            "precision": 0.0, "recall": 0.0, "brier_score": 0.0,
+            "recall_th03": 0.0, "recall_th05": 0.0, "recall_th07": 0.0,
+            "crossing_count": 0, "non_crossing_count": 0
+        }
 
     acc = float(accuracy_score(y_t, y_p))
     p, r, f1, _ = precision_recall_fscore_support(y_t, y_p, average="binary", zero_division=0)
 
     try:
-        # Check if both classes are present for ROC-AUC
+        # Check if both classes are present for ROC-AUC and PR-AUC
         if len(np.unique(y_t)) > 1:
             auc = float(roc_auc_score(y_t, y_pr))
+            pr_auc = float(average_precision_score(y_t, y_pr))
         else:
             auc = 0.5
+            pr_auc = float(np.mean(y_t))
     except Exception:
         auc = 0.5
+        pr_auc = 0.5
+
+    try:
+        brier = float(brier_score_loss(y_t, y_pr))
+    except Exception:
+        brier = 0.0
+
+    # Fixed-threshold recall
+    rec_th03 = float(np.sum((y_pr >= 0.3) & (y_t == 1)) / max(1, np.sum(y_t == 1)))
+    rec_th05 = float(np.sum((y_pr >= 0.5) & (y_t == 1)) / max(1, np.sum(y_t == 1)))
+    rec_th07 = float(np.sum((y_pr >= 0.7) & (y_t == 1)) / max(1, np.sum(y_t == 1)))
 
     return {
         "accuracy": round(acc * 100.0, 2),
         "auc": round(auc * 100.0, 2),
+        "pr_auc": round(pr_auc * 100.0, 2),
         "f1": round(float(f1) * 100.0, 2),
         "precision": round(float(p) * 100.0, 2),
         "recall": round(float(r) * 100.0, 2),
+        "brier_score": round(brier, 4),
+        "recall_th03": round(rec_th03 * 100.0, 2),
+        "recall_th05": round(rec_th05 * 100.0, 2),
+        "recall_th07": round(rec_th07 * 100.0, 2),
         "crossing_count": int(np.sum(y_t)),
         "non_crossing_count": int(len(y_t) - np.sum(y_t))
     }
+

@@ -164,4 +164,28 @@ We pre-commit to publishing whichever outcome is observed without shifting crite
 
 ---
 
-*This document represents the immutable pre-registration audit for the research project conducted by Vikash Paigamber at Maulana Azad National Institute of Technology (MANIT), Bhopal. Locked on October 5, 2026.*
+## 7. Addendum 1 (Locked October 6, 2026): Regularized Training Checkpoint Selection & Plateau-Smoothed Rule
+
+Following the empirical completion of the regularized training run (`weight_decay=0.01`, `dropout=0.3`, Early Stopping on `val_auc` with patience 8), we formalize the following selection protocol prior to any inference on the held-out test split:
+
+1. **Dual Checkpoint Reporting Rule**:
+   * **Primary Checkpoint**: The best single-epoch checkpoint selected strictly by Early Stopping on `val_auc` (Epoch 26, `87.57%` Val AUC, preserved at `experiments/checkpoints/proposed_seed42/checkpoint_best.pt`).
+   * **Plateau-Smoothed Anchor**: To counter single-epoch "spike-picking" luck, we pre-specify a 3-epoch moving window centered on the peak (Epochs 25–27: $[82.56\%, 87.57\%, 86.95\%] \to \text{Mean } \mathbf{85.69\%}$ AUC).
+   * **Identical Rule for Isolated Baseline**: The exact same single-epoch best and 3-epoch smoothed window will be applied to the isolated baseline (`experiments/checkpoints/isolated_seed42/checkpoint_best.pt`).
+
+2. **Expanded Metric Reporting Suite**:
+   * To account for class imbalance ($\approx 17.5\%$ crossing in validation), all pilot and confirmatory runs report:
+     - ROC-AUC (Primary discriminative metric)
+     - PR-AUC / Average Precision (Insensitive to majority non-crossing skew)
+     - F1-Score at standard 0.5 decision threshold
+     - Fixed-threshold Recall ($\tau \in \{0.3, 0.5, 0.7\}$)
+     - Brier Score (Probabilistic calibration error)
+
+3. **Pre-Registered H2 Validation Audit Tool**:
+   * Evaluated via [`tools/eval_h2_validation_comparison.py`](file:///home/vikash/Desktop/research%20Implementation/tools/eval_h2_validation_comparison.py) executing 1,000 paired, track-clustered bootstrap resamples across the 239 validation pedestrian tracks.
+   * All per-window predictions are permanently saved to `experiments/results/val_h2_comparison_seed42.npz` for open-science reproducibility.
+
+---
+
+*This document represents the immutable pre-registration audit for the research project conducted by Vikash Paigamber at Maulana Azad National Institute of Technology (MANIT), Bhopal. Locked on October 5, 2026. Addendum 1 locked on October 6, 2026.*
+

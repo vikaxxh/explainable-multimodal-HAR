@@ -198,9 +198,11 @@ class Trainer:
             c_metrics = compute_crossing_intention_metrics(all_cross_true, all_cross_probs, all_cross_preds)
             res["val_acc_cross"] = c_metrics["accuracy"]
             res["val_auc"] = c_metrics["auc"]
+            res["val_pr_auc"] = c_metrics.get("pr_auc", 0.0)
             res["val_f1_cross"] = c_metrics["f1"]
             res["val_precision"] = c_metrics["precision"]
             res["val_recall"] = c_metrics["recall"]
+            res["val_brier"] = c_metrics.get("brier_score", 0.0)
 
         return res
 
@@ -296,7 +298,7 @@ class Trainer:
 
             if self.rank == 0:
                 tr_cross = f" | Cross Acc: {train_metrics['train_acc_cross']:.1f}%" if "train_acc_cross" in train_metrics else ""
-                auc_str = f" | Val AUC: {val_metrics['val_auc']:.2f}% (F1: {val_metrics['val_f1_cross']:.2f}%)" if "val_auc" in val_metrics else ""
+                auc_str = f" | Val AUC: {val_metrics['val_auc']:.2f}% (PR: {val_metrics.get('val_pr_auc', 0.0):.2f}%, F1: {val_metrics['val_f1_cross']:.2f}%)" if "val_auc" in val_metrics else ""
                 print(
                     f"Epoch [{epoch+1:02d}/{self.epochs:02d}] "
                     f"Train Loss: {train_metrics['train_loss']:.4f}{tr_cross} (Ped: {train_metrics['train_acc_ped']:.1f}%) | "
