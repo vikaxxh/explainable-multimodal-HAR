@@ -82,17 +82,27 @@ class RGBEncoder(nn.Module):
         """
         B, T, C, H, W = rgb_seq.shape
 
-        # Fast path for placeholder zeros: prevents hundreds of thousands of redundant CNN passes on CPU
+        # Fast path for placeholder zeros: prevents redundant passes on CPU/GPU
         if rgb_seq.abs().max() == 0:
-            if not hasattr(self, "_cached_zero_out") or self._cached_zero_out.device != rgb_seq.device:
-                with torch.no_grad():
-                    dummy = torch.zeros(1, C, H, W, device=rgb_seq.device, dtype=rgb_seq.dtype)
-                    if self.backbone_type == "resnet18":
-                        d_feat = self.backbone(dummy).view(1, -1)
-                    else:
-                        d_feat = self.backbone(dummy)
-                    self._cached_zero_out = self.projector(d_feat)  # (1, feature_dim)
-            return self._cached_zero_out.view(1, 1, self.feature_dim).expand(B, T, self.feature_dim)
+            if not self.training:
+                if not hasattr(self, "_cached_zero_out") or self._cached_zero_out.device != rgb_seq.device:
+                    with torch.no_grad():
+                        dummy = torch.zeros(1, C, H, W, device=rgb_seq.device, dtype=rgb_seq.dtype)
+                        if self.backbone_type == "resnet18":
+                            d_feat = self.backbone(dummy).view(1, -1)
+                        else:
+                            d_feat = self.backbone(dummy)
+                        self._cached_zero_out = self.projector(d_feat)  # (1, feature_dim)
+                return self._cached_zero_out.view(1, 1, self.feature_dim).expand(B, T, self.feature_dim)
+            else:
+                # During training: process single dummy frame with active autograd graph
+                dummy = torch.zeros(1, C, H, W, device=rgb_seq.device, dtype=rgb_seq.dtype)
+                if self.backbone_type == "resnet18":
+                    d_feat = self.backbone(dummy).view(1, -1)
+                else:
+                    d_feat = self.backbone(dummy)
+                zero_feat = self.projector(d_feat)
+                return zero_feat.view(1, 1, self.feature_dim).expand(B, T, self.feature_dim)
 
         # Standard forward pass for real RGB frames
         x = rgb_seq.view(B * T, C, H, W)

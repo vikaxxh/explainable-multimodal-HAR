@@ -78,7 +78,7 @@ data:
   processed_dir: "data/processed"
   annotations_dir: "data/annotations"
   splits_dir: "data/splits"
-  window_size: 32           # Temporal window T (experiments with 16, 32, 64)
+  window_size: 16           # Temporal window T (16 frames matching preprocessed PIE)
   stride: 8                 # Stride for sliding window
   fps: 10.0                 # Target sampling FPS
   max_agents: 8             # Max interacting agents tracked per scene
@@ -169,11 +169,15 @@ training:
 
   # Phase 19 & 23: Multi-task Loss Weights
   loss_weights:
-    lambda_ped: 1.0         # Pedestrian behavior loss
-    lambda_micro: 1.0       # Micromobility behavior loss
-    lambda_inter: 1.0       # Interaction behavior loss
-    lambda_align: 0.1       # Cross-modal alignment loss
-    lambda_xai: 0.05        # Explanation consistency regularization
+    lambda_cross: 3.0       # Primary benchmark task: binary crossing intention
+    lambda_action: 0.5      # Secondary human action task: walking vs standing
+    lambda_ped: 0.5         # Pedestrian behavior taxonomy classification
+    lambda_micro: 0.0       # Disabled for PIE (no micromobility agents in dataset)
+    lambda_inter: 0.0       # Disabled for PIE / isolated (no interaction ground truth)
+    lambda_align: 0.0       # Cross-modal alignment loss (disabled when interaction branch is inactive)
+    lambda_xai: 0.01        # Modality attribution sparsity regularization
+    alpha_cross: 0.75       # Class balance weight for minority crossing class in Focal Loss
+    gamma: 2.0              # Focusing parameter for Focal Loss
 
 # ------------------------------------------------------------------------------
 # Explainability & Evaluation (Phases 20-22, 26)

@@ -67,13 +67,16 @@ class Trainer:
         # Loss function
         loss_weights = cfg_train.get("loss_weights", {})
         self.criterion = MultiTaskBehaviorLoss(
-            lambda_ped=float(loss_weights.get("lambda_ped", 1.0)),
-            lambda_micro=float(loss_weights.get("lambda_micro", 1.0)),
-            lambda_inter=float(loss_weights.get("lambda_inter", 1.0)),
-            lambda_align=float(loss_weights.get("lambda_align", 0.1)),
-            lambda_xai=float(loss_weights.get("lambda_xai", 0.05)),
+            lambda_cross=float(loss_weights.get("lambda_cross", 3.0)),
+            lambda_action=float(loss_weights.get("lambda_action", 0.5)),
+            lambda_ped=float(loss_weights.get("lambda_ped", 0.5)),
+            lambda_micro=float(loss_weights.get("lambda_micro", 0.0)),
+            lambda_inter=float(loss_weights.get("lambda_inter", 0.0)),
+            lambda_align=float(loss_weights.get("lambda_align", 0.0)),
+            lambda_xai=float(loss_weights.get("lambda_xai", 0.01)),
+            alpha_cross=float(loss_weights.get("alpha_cross", 0.75)),
             use_focal_loss=True,
-            gamma=2.0
+            gamma=float(loss_weights.get("gamma", 2.0))
         )
 
         # Optimizer & Scheduler

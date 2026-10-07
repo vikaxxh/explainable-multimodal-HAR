@@ -100,7 +100,19 @@ def run_diagnostics():
 
     # 4. Check Gradient Flow & Magnitude per Submodule
     print("\n[4/4] Gradient Flow Audit across Modules...")
-    criterion = MultiTaskBehaviorLoss(use_focal_loss=True, gamma=2.0)
+    loss_weights = config.get("training", {}).get("loss_weights", {})
+    criterion = MultiTaskBehaviorLoss(
+        lambda_cross=float(loss_weights.get("lambda_cross", 3.0)),
+        lambda_action=float(loss_weights.get("lambda_action", 0.5)),
+        lambda_ped=float(loss_weights.get("lambda_ped", 0.5)),
+        lambda_micro=float(loss_weights.get("lambda_micro", 0.0)),
+        lambda_inter=float(loss_weights.get("lambda_inter", 0.0)),
+        lambda_align=float(loss_weights.get("lambda_align", 0.0)),
+        lambda_xai=float(loss_weights.get("lambda_xai", 0.01)),
+        alpha_cross=float(loss_weights.get("alpha_cross", 0.75)),
+        use_focal_loss=True,
+        gamma=float(loss_weights.get("gamma", 2.0))
+    )
     loss_dict = criterion(out, batch_gpu)
     loss = loss_dict["loss_total"]
     print(f"      Loss Total: {loss.item():.4f}")
@@ -131,14 +143,14 @@ def run_diagnostics():
     print("FOCAL LOSS CLASS-BALANCE INSPECTION:")
     print("=" * 75)
     focal = criterion.crit_cross
-    has_alpha = hasattr(focal, "alpha")
+    has_alpha = hasattr(focal, "alpha") and focal.alpha is not None
     print(f"Focal Loss Gamma:          {focal.gamma}")
     print(f"Focal Loss Label Smoothing: {focal.label_smoothing}")
     print(f"Has Class Weight (Alpha):  {has_alpha} (Actual alpha: {getattr(focal, 'alpha', None)})")
-    if not has_alpha or getattr(focal, "alpha", None) is None:
+    if not has_alpha:
         print(">> [CRITICAL FINDING]: Focal Loss lacks class weight alpha!")
-        print("   On an ~82.6% negative dataset without alpha, Focal Loss penalizes majority-class false positives")
-        print("   at (1 - 0.826)^2 = 0.03x, allowing the model to minimize loss by collapsing entirely into the majority class.")
+    else:
+        print(">> [AUDIT PASS]: Alpha class weighting active for minority crossing class.")
     print("=" * 75 + "\n")
 
 
