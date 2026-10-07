@@ -78,7 +78,7 @@ data:
   processed_dir: "data/processed"
   annotations_dir: "data/annotations"
   splits_dir: "data/splits"
-  window_size: 16           # Temporal window T (16 frames matching preprocessed PIE)
+  window_size: 32           # Temporal window T (32 frames on HPC benchmark)
   stride: 8                 # Stride for sliding window
   fps: 10.0                 # Target sampling FPS
   max_agents: 8             # Max interacting agents tracked per scene

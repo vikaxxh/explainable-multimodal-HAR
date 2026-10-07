@@ -68,9 +68,10 @@ class MultimodalSequenceDataset(Dataset):
         try:
             if file_path.endswith(".npz"):
                 with np.load(file_path, allow_pickle=True) as data:
+                    seq_len = data["trajectory"].shape[0] if "trajectory" in data else self.window_size
                     raw_rgb = data["rgb"]
-                    if raw_rgb.shape != (self.window_size, 3, 224, 224):
-                        rgb_tensor = torch.zeros((self.window_size, 3, 224, 224), dtype=torch.float32)
+                    if raw_rgb.shape != (seq_len, 3, 224, 224):
+                        rgb_tensor = torch.zeros((seq_len, 3, 224, 224), dtype=torch.float32)
                     else:
                         rgb_tensor = torch.from_numpy(raw_rgb).float()
 
