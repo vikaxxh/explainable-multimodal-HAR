@@ -169,13 +169,13 @@ training:
 
   # Phase 19 & 23: Multi-task Loss Weights
   loss_weights:
-    lambda_cross: 3.0       # Primary benchmark task: binary crossing intention
-    lambda_action: 0.5      # Secondary human action task: walking vs standing
-    lambda_ped: 0.5         # Pedestrian behavior taxonomy classification
+    lambda_cross: 5.0       # Primary benchmark task: binary crossing intention (dominant weight)
+    lambda_action: 0.1      # Secondary human action task: walking vs standing
+    lambda_ped: 0.1         # Pedestrian behavior taxonomy classification
     lambda_micro: 0.0       # Disabled for PIE (no micromobility agents in dataset)
     lambda_inter: 0.0       # Disabled for PIE / isolated (no interaction ground truth)
     lambda_align: 0.0       # Cross-modal alignment loss (disabled when interaction branch is inactive)
-    lambda_xai: 0.01        # Modality attribution sparsity regularization
+    lambda_xai: 0.0         # Disabled for isolated baseline to prevent gradient dilution
     alpha_cross: 0.75       # Class balance weight for minority crossing class in Focal Loss
     gamma: 2.0              # Focusing parameter for Focal Loss
 
