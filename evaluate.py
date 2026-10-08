@@ -31,9 +31,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate X-MIST / EMIT-HAR Research Models")
     parser.add_argument("--config", type=str, default="configs/config.yaml", help="Path to config file")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to trained checkpoint")
-    parser.add_argument("--model_type", type=str, default="proposed", help="Model type to evaluate")
+    parser.add_argument("--model_type", type=str, default="proposed", choices=["proposed", "isolated"], help="Model type to evaluate")
     parser.add_argument("--data_dir", type=str, default="data/processed", help="Path to evaluation data")
     parser.add_argument("--split", type=str, default="test", choices=["test", "val", "train"], help="Data split to evaluate")
+    parser.add_argument("--save_predictions", type=str, default=None, help="Path to save evaluation predictions as .npz")
     parser.add_argument("--ablation", action="store_true", help="Execute complete ablation matrix (A1 to A9)")
     parser.add_argument("--robustness", action="store_true", help="Execute robustness and sensor stress-testing")
     parser.add_argument("--synthetic", action="store_true", help="Use synthetic dataset for dry runs")
@@ -68,11 +69,21 @@ def main():
         return
 
     # 2. Build or Load Target Model
-    model = ProposedXMISTModel(feature_dim=config["model"]["feature_dim"])
+    is_isolated = (args.model_type == "isolated")
+    model = ProposedXMISTModel(
+        feature_dim=config["model"]["feature_dim"],
+        use_interaction=not is_isolated
+    )
     if args.checkpoint and os.path.exists(args.checkpoint):
         ckpt = torch.load(args.checkpoint, map_location=device)
-        model.load_state_dict(ckpt["model_state_dict"])
-        print(f"[Eval] Loaded weights from {args.checkpoint}")
+        state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
+        clean_state = {k.replace("module.", ""): v for k, v in state_dict.items()}
+        missing, unexpected = model.load_state_dict(clean_state, strict=False)
+        print(f"[Eval] Loaded weights from {args.checkpoint} (model_type='{args.model_type}')")
+        if missing:
+            print(f"[Eval] Missing keys: {len(missing)}")
+        if unexpected:
+            print(f"[Eval] Unexpected keys: {len(unexpected)}")
     else:
         print("[Eval] Evaluating model architecture (uninitialized/default weights)...")
 
@@ -102,6 +113,7 @@ def main():
     y_true_action, y_pred_action = [], []
     y_true_ped, y_pred_ped = [], []
     neighbor_strata = []
+    track_ids = []
 
     total_batches = len(test_loader)
     print(f"[Eval] Starting evaluation across {len(test_ds):,} sequences ({total_batches} batches) on split '{args.split}'...")
@@ -135,6 +147,15 @@ def main():
             y_true_cross.extend(cross_targets.tolist())
             y_probs_cross.extend(cross_probs.tolist())
             y_pred_cross.extend(cross_preds.tolist())
+
+            # Track IDs for cluster bootstrap
+            if "track_id" in batch:
+                if isinstance(batch["track_id"], list):
+                    track_ids.extend([str(t) for t in batch["track_id"]])
+                else:
+                    track_ids.extend([str(t) for t in batch["track_id"].cpu().numpy()])
+            else:
+                track_ids.extend([f"track_{b_idx}_{i}" for i in range(len(cross_targets))])
 
             # Neighbor count stratification
             if "neighbor_mask" in batch:
@@ -217,6 +238,21 @@ def main():
 
     print("="*85 + "\n")
 
+    # 5. Save Predictions for Pre-Registered Hypothesis Testing (H2/H3/H4)
+    if args.save_predictions:
+        save_path = os.path.abspath(args.save_predictions)
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        np.savez_compressed(
+            save_path,
+            y_true=np.array(y_true_cross),
+            y_probs=np.array(y_probs_cross),
+            y_pred=np.array(y_pred_cross),
+            neighbor_counts=np.array(neighbor_strata),
+            track_ids=np.array(track_ids)
+        )
+        print(f"[Eval] Successfully saved per-sample predictions ({len(y_true_cross):,} items) to {save_path}\n")
+
 
 if __name__ == "__main__":
     main()
+
