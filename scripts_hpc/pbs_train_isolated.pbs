@@ -29,6 +29,7 @@ $PYTHON_BIN train.py \
     --epochs 50 \
     --batch_size 16 \
     --seed 42 \
-    --checkpoint_dir experiments/checkpoints/isolated_seed42
+    --checkpoint_dir experiments/checkpoints/isolated_seed42 \
+    --resume experiments/checkpoints/isolated_seed42/checkpoint_latest.pt
 
 echo "Isolated baseline training completed at $(date)"

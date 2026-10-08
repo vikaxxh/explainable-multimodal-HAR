@@ -222,6 +222,7 @@ class Trainer:
             "best_val_loss": self.best_val_loss,
             "best_metric_val": self.best_metric_val,
             "early_stop_metric": self.early_stop_metric,
+            "patience_counter": self.patience_counter,
             "config": self.config
         }
 
@@ -247,6 +248,22 @@ class Trainer:
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.start_epoch = checkpoint["epoch"] + 1
         self.best_val_loss = checkpoint.get("best_val_loss", float("inf"))
+        if "best_metric_val" in checkpoint and checkpoint["best_metric_val"] is not None:
+            self.best_metric_val = checkpoint["best_metric_val"]
+        self.patience_counter = checkpoint.get("patience_counter", 0)
+
+        # Safeguard: ensure best_metric_val is synchronized with checkpoint_best.pt on disk
+        best_path = os.path.join(self.checkpoint_dir, "checkpoint_best.pt")
+        if os.path.exists(best_path):
+            try:
+                b_ckpt = torch.load(best_path, map_location="cpu")
+                if "best_metric_val" in b_ckpt and b_ckpt["best_metric_val"] is not None:
+                    if self.is_maximize:
+                        self.best_metric_val = max(self.best_metric_val, b_ckpt["best_metric_val"])
+                    else:
+                        self.best_metric_val = min(self.best_metric_val, b_ckpt["best_metric_val"])
+            except Exception:
+                pass
 
         if override_lr is not None:
             for param_group in self.optimizer.param_groups:
