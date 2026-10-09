@@ -6,7 +6,7 @@
 #PBS -q dgx
 #PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
 #PBS -l place=free
-#PBS -l walltime=01:00:00
+#PBS -l walltime=02:00:00
 #PBS -j oe
 #PBS -o eval_h3_audit.log
 
@@ -16,7 +16,7 @@ LOG_FILE="$HOME/explainable-multimodal-HAR/eval_h3_audit.log"
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 echo "=========================================================="
-echo "Starting H3 Causal Attribution Audit: $PBS_JOBID on $(hostname) at $(date)"
+echo "Starting H3 Causal Attribution Audit on Test Set 03: $PBS_JOBID on $(hostname) at $(date)"
 echo "=========================================================="
 
 module load compilers/nvidia/cuda/11.6 2>/dev/null || true
@@ -38,7 +38,8 @@ echo "Evaluating checkpoint: $CKPT"
 echo -e "\n>>> RUNNING PLACEBO CONTROL (UNIFORM RANDOM SELECTION) <<<"
 $PYTHON_BIN tools/eval_h3_ablation.py \
     --checkpoint "$CKPT" \
-    --split val \
+    --split test \
+    --frozen \
     --selection random \
     --speed_floor 0.002 \
     --seed 42
@@ -47,7 +48,8 @@ $PYTHON_BIN tools/eval_h3_ablation.py \
 echo -e "\n>>> RUNNING ATTRIBUTION FAITHFULNESS (ATTENTION-TOP SELECTION) <<<"
 $PYTHON_BIN tools/eval_h3_ablation.py \
     --checkpoint "$CKPT" \
-    --split val \
+    --split test \
+    --frozen \
     --selection attention \
     --speed_floor 0.002
 
