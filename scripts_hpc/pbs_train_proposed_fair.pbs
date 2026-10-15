@@ -1,0 +1,51 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Train Fair Proposed Model (Identical Budget & Regularization)
+# ==============================================================================
+#PBS -N emit_prop_train
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=24:00:00
+#PBS -j oe
+#PBS -o train_proposed_fair.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/train_proposed_fair.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "Starting Fair Proposed Multi-Agent Training: $PBS_JOBID on $(hostname) at $(date)"
+echo "Working Directory: $(pwd)"
+echo "=========================================================="
+
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+if [ ! -f "$PYTHON_BIN" ]; then
+    PYTHON_BIN="$(which python)"
+fi
+echo "Using Python binary: $PYTHON_BIN"
+
+# Verify GPU
+$PYTHON_BIN -c "import torch; print(f'PyTorch: {torch.__version__} | CUDA available: {torch.cuda.is_available()} | Device: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"None\"}')"
+
+export PYTHONUNBUFFERED=1
+mkdir -p experiments/checkpoints/proposed_seed42
+
+RESUME_ARG=""
+if [ -f "experiments/checkpoints/proposed_seed42/checkpoint_latest.pt" ]; then
+    echo "Found checkpoint_latest.pt, resuming training..."
+    RESUME_ARG="--resume experiments/checkpoints/proposed_seed42/checkpoint_latest.pt"
+fi
+
+$PYTHON_BIN train.py \
+    --model proposed \
+    --data_dir data/processed_pie \
+    --epochs 50 \
+    --batch_size 16 \
+    --seed 42 \
+    --checkpoint_dir experiments/checkpoints/proposed_seed42 \
+    $RESUME_ARG
+
+echo "Proposed model training completed at $(date)"
