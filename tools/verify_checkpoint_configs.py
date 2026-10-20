@@ -7,8 +7,9 @@ import os
 import torch
 
 checkpoints = [
-    ("PROPOSED MODEL", "experiments/checkpoints/pie/checkpoint_best.pt"),
-    ("ISOLATED BASELINE", "experiments/checkpoints/isolated_seed42/checkpoint_best.pt")
+    ("FAIR PROPOSED MODEL (NEW)", "experiments/checkpoints/proposed_seed42/checkpoint_best.pt"),
+    ("FAIR ISOLATED BASELINE", "experiments/checkpoints/isolated_seed42/checkpoint_best.pt"),
+    ("LEGACY PROPOSED MODEL", "experiments/checkpoints/pie/checkpoint_best.pt")
 ]
 
 print("=" * 85)
