@@ -1,0 +1,36 @@
+#!/bin/bash
+# ==============================================================================
+# PBS Job Script: Check 3C - Shuffled-Neighbor Negative Control on DGX GPU
+# ==============================================================================
+#PBS -N emit_shuffled
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -o eval_shuffled_control.log
+
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+
+LOG_FILE="$HOME/explainable-multimodal-HAR/eval_shuffled_control.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+echo "=========================================================="
+echo "Starting Check 3C Shuffled-Neighbor Control: $PBS_JOBID on $(hostname) at $(date)"
+echo "=========================================================="
+
+module load compilers/nvidia/cuda/11.6 2>/dev/null || true
+PYTHON_BIN="$HOME/.conda/envs/emit-har/bin/python"
+if [ ! -f "$PYTHON_BIN" ]; then
+    PYTHON_BIN="$(which python)"
+fi
+export PYTHONUNBUFFERED=1
+
+$PYTHON_BIN tools/eval_shuffled_neighbor_control.py \
+    --checkpoint experiments/checkpoints/proposed_seed42/checkpoint_best.pt \
+    --split val \
+    --batch_size 32 \
+    --seed 42 \
+    --output_file experiments/results/val_shuffled_control_seed42.npz
+
+echo "Check 3C shuffled-neighbor evaluation completed at $(date)"

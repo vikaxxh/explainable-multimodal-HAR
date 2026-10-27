@@ -35,14 +35,15 @@ def run_shuffled_neighbor_control(
     model.eval()
     rng = np.random.default_rng(seed)
 
-    print("=" * 80)
+    print("=" * 85)
     print("RUNNING SHUFFLED-NEIGHBOR NEGATIVE CONTROL AUDIT")
     print(f"Seed: {seed}")
-    print("=" * 80)
+    print("=" * 85)
 
     y_true = []
     probs_intact = []
     probs_shuffled = []
+    abs_deltas = []
     track_diffs: Dict[str, List[float]] = {}
 
     with torch.no_grad():
@@ -74,12 +75,13 @@ def run_shuffled_neighbor_control(
             else:
                 p_shuf = F.softmax(out_shuf["crossing_logits"], dim=-1)[:, 1].cpu().numpy()
 
-            targets = batch["cross"].cpu().numpy()
+            targets = batch["cross"].cpu().numpy() if torch.is_tensor(batch["cross"]) else np.asarray(batch["cross"])
             y_true.extend(targets.tolist())
             probs_intact.extend(p_int.tolist())
             probs_shuffled.extend(p_shuf.tolist())
 
             diffs = np.abs(p_int - p_shuf)
+            abs_deltas.extend(diffs.tolist())
             for b in range(B):
                 tid = str(batch["track_id"][b])
                 track_diffs.setdefault(tid, []).append(float(diffs[b]))
@@ -87,49 +89,66 @@ def run_shuffled_neighbor_control(
     metrics_intact = compute_crossing_intention_metrics(y_true, probs_intact)
     metrics_shuffled = compute_crossing_intention_metrics(y_true, probs_shuffled)
 
+    abs_deltas = np.array(abs_deltas)
+    median_shift = float(np.median(abs_deltas))
+    mean_shift = float(np.mean(abs_deltas))
+    p90_shift = float(np.percentile(abs_deltas, 90))
+    max_shift = float(np.max(abs_deltas))
+
     track_medians = [float(np.median(v)) for v in track_diffs.values()]
     w_stat, p_val = stats.wilcoxon(track_medians, alternative="greater")
 
-    print("\n" + "=" * 80)
-    print("SHUFFLED-NEIGHBOR CONTROL AUDIT REPORT")
-    print("=" * 80)
+    delta_auc = metrics_intact["auc"] - metrics_shuffled["auc"]
+    delta_prauc = metrics_intact["pr_auc"] - metrics_shuffled["pr_auc"]
+    delta_f1 = metrics_intact["f1"] - metrics_shuffled["f1"]
+    delta_brier = metrics_shuffled["brier_score"] - metrics_intact["brier_score"]
+
+    print("\n" + "=" * 85)
+    print("CHECK 3C: SHUFFLED-NEIGHBOR NEGATIVE CONTROL RESULTS")
+    print("=" * 85)
     print(f"Total Windows Evaluated:              {len(y_true):,}")
     print(f"Independent Track Clusters:           {len(track_medians)} tracks")
-    print("-" * 80)
-    print(f"Intact Neighbors Benchmark:")
-    print(f"  Accuracy:                           {metrics_intact['accuracy']:.2f}%")
-    print(f"  ROC-AUC:                            {metrics_intact['auc']:.2f}%")
-    print(f"  F1-Score:                           {metrics_intact['f1']:.2f}%")
-    print(f"Shuffled (Unrelated) Neighbors Control:")
-    print(f"  Accuracy:                           {metrics_shuffled['accuracy']:.2f}%")
-    print(f"  ROC-AUC:                            {metrics_shuffled['auc']:.2f}%")
-    print(f"  F1-Score:                           {metrics_shuffled['f1']:.2f}%")
-    print("-" * 80)
-    print(f"Performance Gap (Intact - Shuffled):")
-    print(f"  ΔAUC:                               {metrics_intact['auc'] - metrics_shuffled['auc']:+.2f}%")
-    print(f"  ΔF1:                                {metrics_intact['f1'] - metrics_shuffled['f1']:+.2f}%")
-    print(f"Track Median Output Displacement |ΔP|: {float(np.median(track_medians)):.4f}")
+    print("-" * 85)
+    print(f"{'Condition':<30} | {'ROC-AUC (%)':<14} | {'PR-AUC (%)':<14} | {'F1-Score (%)':<14} | {'Brier':<8}")
+    print("-" * 85)
+    print(f"{'Intact Inputs (Normal)':<30} | {metrics_intact['auc']:<14.2f} | {metrics_intact['pr_auc']:<14.2f} | {metrics_intact['f1']:<14.2f} | {metrics_intact['brier_score']:<8.4f}")
+    print(f"{'Shuffled Neighbors (Random)':<30} | {metrics_shuffled['auc']:<14.2f} | {metrics_shuffled['pr_auc']:<14.2f} | {metrics_shuffled['f1']:<14.2f} | {metrics_shuffled['brier_score']:<8.4f}")
+    print(f"{'Gap (Δ = Intact - Shuffled)':<30} | {delta_auc:<+14.2f} | {delta_prauc:<+14.2f} | {delta_f1:<+14.2f} | {delta_brier:<+8.4f}")
+    print("-" * 85)
+    print("Per-Window Shuffled Counterfactual Probability Shift (|P_intact - P_shuffled|):")
+    print(f"  Median Absolute Shift:  {median_shift:.5f} ({median_shift * 100:.3f}%)")
+    print(f"  Mean Absolute Shift:    {mean_shift:.5f} ({mean_shift * 100:.3f}%)")
+    print(f"  90th Percentile Shift:  {p90_shift:.5f} ({p90_shift * 100:.3f}%)")
+    print(f"  Max Absolute Shift:     {max_shift:.5f} ({max_shift * 100:.3f}%)")
+    print("-" * 85)
+    print(f"Track Median Output Displacement |ΔP|: {float(np.median(track_medians)):.5f}")
     print(f"One-Sided Wilcoxon Displacement Test: W = {w_stat:.1f}, p = {p_val:.5e}")
-    print("=" * 80 + "\n")
+    print("=" * 85 + "\n")
 
     return {
         "metrics_intact": metrics_intact,
         "metrics_shuffled": metrics_shuffled,
-        "delta_auc": metrics_intact["auc"] - metrics_shuffled["auc"],
-        "delta_f1": metrics_intact["f1"] - metrics_shuffled["f1"],
+        "delta_auc": delta_auc,
+        "delta_prauc": delta_prauc,
+        "delta_f1": delta_f1,
         "median_displacement": float(np.median(track_medians)),
-        "p_val": float(p_val)
+        "p_val": float(p_val),
+        "y_true": np.array(y_true),
+        "probs_intact": np.array(probs_intact),
+        "probs_shuffled": np.array(probs_shuffled)
     }
 
 
 def main():
     p = argparse.ArgumentParser(description="Evaluate Shuffled-Neighbor Negative Control")
-    p.add_argument("--checkpoint", type=str, required=True, help="Path to model checkpoint")
+    p.add_argument("--checkpoint", type=str, default="experiments/checkpoints/proposed_seed42/checkpoint_best.pt",
+                   help="Path to proposed model checkpoint")
     p.add_argument("--config", type=str, default="configs/config.yaml", help="Path to config file")
     p.add_argument("--data_dir", type=str, default="data/processed_pie", help="Path to processed dataset")
     p.add_argument("--split", type=str, default="val", choices=["val", "test"], help="Dataset split")
     p.add_argument("--batch_size", type=int, default=32, help="Batch size")
     p.add_argument("--seed", type=int, default=42, help="Random seed")
+    p.add_argument("--output_file", type=str, default="", help="Optional path to save npz results")
     p.add_argument("--frozen", action="store_true", help="Required flag when evaluating on held-out test split")
     args = p.parse_args()
 
@@ -147,7 +166,7 @@ def main():
         dropout=0.0
     ).to(device)
 
-    state_dict = ckpt["model_state_dict"]
+    state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
     clean_state = {k.replace("module.", ""): v for k, v in state_dict.items()}
     load_res = model.load_state_dict(clean_state, strict=False)
     has_crossing_head = any(k.startswith("crossing_head") for k in clean_state.keys())
@@ -173,12 +192,22 @@ def main():
         num_workers=2 if device.type == "cuda" else 0
     )
 
-    run_shuffled_neighbor_control(
+    results = run_shuffled_neighbor_control(
         model=model,
         loader=loader,
         device=device,
         seed=args.seed
     )
+
+    if args.output_file:
+        os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
+        np.savez_compressed(
+            args.output_file,
+            y_true=results["y_true"],
+            probs_intact=results["probs_intact"],
+            probs_shuffled=results["probs_shuffled"]
+        )
+        print(f"Saved shuffled control arrays to: {args.output_file}")
 
 
 if __name__ == "__main__":
