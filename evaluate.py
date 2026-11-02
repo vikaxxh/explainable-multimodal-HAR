@@ -31,13 +31,16 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate X-MIST / EMIT-HAR Research Models")
     parser.add_argument("--config", type=str, default="configs/config.yaml", help="Path to config file")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to trained checkpoint")
-    parser.add_argument("--model_type", type=str, default="proposed", choices=["proposed", "isolated"], help="Model type to evaluate")
+    parser.add_argument("--model_type", type=str, default=None,
+                        help="Model variant (default: read 'project.model_variant' from the checkpoint)")
     parser.add_argument("--data_dir", type=str, default="data/processed", help="Path to evaluation data")
     parser.add_argument("--split", type=str, default="test", choices=["test", "val", "train"], help="Data split to evaluate")
     parser.add_argument("--save_predictions", type=str, default=None, help="Path to save evaluation predictions as .npz")
     parser.add_argument("--ablation", action="store_true", help="Execute complete ablation matrix (A1 to A9)")
     parser.add_argument("--robustness", action="store_true", help="Execute robustness and sensor stress-testing")
     parser.add_argument("--synthetic", action="store_true", help="Use synthetic dataset for dry runs")
+    parser.add_argument("--allow_random_weights", action="store_true", help="Allow evaluating without a checkpoint (smoke tests only)")
+    parser.add_argument("--frozen", action="store_true", help="Required to evaluate the held-out test split")
     return parser.parse_args()
 
 
@@ -50,8 +53,10 @@ def main():
     print(f"[Eval] Running evaluation on device: {device}")
 
     # Prepare Data
-    split_dir = os.path.join(args.data_dir, args.split)
-    if args.synthetic or not os.path.exists(split_dir):
+    if args.split == "test" and not args.frozen and not args.synthetic:
+        raise SystemExit("Refusing to evaluate the held-out test split without --frozen.")
+    if args.synthetic:
+        print("[Eval] WARNING: evaluating on SYNTHETIC data.")
         test_ds = SyntheticMultimodalDataset(num_samples=64, window_size=window_size, seed=999)
     else:
         test_ds = MultimodalSequenceDataset(data_dir=args.data_dir, split=args.split, window_size=window_size)
@@ -65,27 +70,37 @@ def main():
 
     # 1. Ablation Matrix
     if args.ablation:
+        if not args.allow_random_weights:
+            raise SystemExit("--ablation evaluates UNTRAINED models (pipeline smoke test only). "
+                             "Re-run with --allow_random_weights if that is what you want; do not report its numbers.")
         run_ablation_study(test_loader, device=device, output_dir=config["project"]["output_dir"])
         return
 
     # 2. Build or Load Target Model
-    is_isolated = (args.model_type == "isolated")
-    model = ProposedXMISTModel(
-        feature_dim=config["model"]["feature_dim"],
-        use_interaction=not is_isolated
-    )
-    if args.checkpoint and os.path.exists(args.checkpoint):
+    from train import build_model
+    ckpt = None
+    if args.checkpoint:
+        if not os.path.exists(args.checkpoint):
+            raise FileNotFoundError(f"Checkpoint not found: {args.checkpoint}")
         ckpt = torch.load(args.checkpoint, map_location=device)
+    elif not args.allow_random_weights:
+        raise SystemExit("No --checkpoint given. Pass --allow_random_weights for an explicit smoke test.")
+
+    model_type = args.model_type
+    if model_type is None:
+        model_type = (ckpt or {}).get("config", {}).get("project", {}).get("model_variant", "proposed")
+    model_cfg = (ckpt or {}).get("config", config)
+    model = build_model(model_type, model_cfg, device)
+    if ckpt is not None:
         state_dict = ckpt["model_state_dict"] if "model_state_dict" in ckpt else ckpt
         clean_state = {k.replace("module.", ""): v for k, v in state_dict.items()}
         missing, unexpected = model.load_state_dict(clean_state, strict=False)
-        print(f"[Eval] Loaded weights from {args.checkpoint} (model_type='{args.model_type}')")
-        if missing:
-            print(f"[Eval] Missing keys: {len(missing)}")
-        if unexpected:
-            print(f"[Eval] Unexpected keys: {len(unexpected)}")
+        if missing or unexpected:
+            raise RuntimeError(f"Checkpoint/model mismatch for '{model_type}': missing={missing[:5]}... "
+                               f"({len(missing)}), unexpected={unexpected[:5]}... ({len(unexpected)})")
+        print(f"[Eval] Loaded {args.checkpoint} as '{model_type}' (epoch {ckpt.get('epoch')})")
     else:
-        print("[Eval] Evaluating model architecture (uninitialized/default weights)...")
+        print("[Eval] WARNING: evaluating RANDOM weights (smoke test).")
 
     model.to(device)
     model.eval()

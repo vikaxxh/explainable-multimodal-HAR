@@ -39,7 +39,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train X-MIST / EMIT-HAR Models")
     parser.add_argument("--config", type=str, default="configs/config.yaml", help="Path to config file")
     parser.add_argument("--model", type=str, default="proposed",
-                        choices=["proposed", "isolated", "proximity_only", "urgency_aware", "baseline_rgb", "baseline_traj", "baseline_pose", "intentformer"],
+                        choices=["traj_full", "traj_isolated", "traj_proximity_only", "traj_urgency_aware",
+                                 "proposed", "isolated", "proximity_only", "urgency_aware",
+                                 "baseline_rgb", "baseline_traj", "baseline_pose", "intentformer"],
                         help="Model architecture variant")
     parser.add_argument("--data_dir", type=str, default="data/processed", help="Path to processed sequences")
     parser.add_argument("--epochs", type=int, default=None, help="Override number of epochs")
@@ -72,28 +74,43 @@ def init_distributed():
 
 
 def build_model(model_type: str, config: dict, device: torch.device) -> torch.nn.Module:
-    feat_dim = config.get("model", {}).get("feature_dim", 256)
-    dropout = config.get("model", {}).get("dropout", 0.1)
+    mcfg = config.get("model", {})
+    feat_dim = mcfg.get("feature_dim", 256)
+    dropout = mcfg.get("dropout", 0.1)
+    icfg = mcfg.get("interaction", {})
+    graph_kwargs = dict(
+        distance_threshold=float(icfg.get("distance_threshold", 12.0)),
+        min_closing_speed=float(icfg.get("min_closing_speed", 1e-3)),
+    )
 
-    if model_type == "proposed":
-        model = ProposedXMISTModel(feature_dim=feat_dim, dropout=dropout)
+    # Trajectory-only variants used for the CVMI paper: identical encoder/temporal/head stack,
+    # differing ONLY in whether the neighbour interaction branch is present.
+    traj_only = dict(use_rgb=False, use_pose=False, use_traj=True, use_scene=False,
+                     use_cross_modal=False, use_modality_gating=False)
+    if model_type == "traj_full":
+        model = ProposedXMISTModel(feature_dim=feat_dim, dropout=dropout, use_interaction=True, **traj_only, **graph_kwargs)
+    elif model_type == "traj_isolated":
+        model = ProposedXMISTModel(feature_dim=feat_dim, dropout=dropout, use_interaction=False, **traj_only, **graph_kwargs)
+    elif model_type == "traj_proximity_only":
+        model = ProposedXMISTModel(feature_dim=feat_dim, dropout=dropout, use_interaction=True, edge_mode="proximity_only", **traj_only, **graph_kwargs)
+    elif model_type == "traj_urgency_aware":
+        model = ProposedXMISTModel(feature_dim=feat_dim, dropout=dropout, use_interaction=True, edge_mode="urgency_aware", **traj_only, **graph_kwargs)
+    elif model_type == "proposed":
+        model = ProposedXMISTModel(feature_dim=feat_dim, dropout=dropout, **graph_kwargs)
     elif model_type == "isolated":
-        # Fair isolated baseline: identical architecture, with interaction branch disabled
-        model = ProposedXMISTModel(feature_dim=feat_dim, use_interaction=False, dropout=dropout)
+        model = ProposedXMISTModel(feature_dim=feat_dim, use_interaction=False, dropout=dropout, **graph_kwargs)
     elif model_type == "proximity_only":
-        # Proximity-only variant: distance-only edges, velocity stripped from nodes & edges
-        model = ProposedXMISTModel(feature_dim=feat_dim, edge_mode="proximity_only", dropout=dropout)
+        model = ProposedXMISTModel(feature_dim=feat_dim, edge_mode="proximity_only", dropout=dropout, **graph_kwargs)
     elif model_type == "urgency_aware":
-        # Urgency-aware variant: closing velocity and TTC edges
-        model = ProposedXMISTModel(feature_dim=feat_dim, edge_mode="urgency_aware", dropout=dropout)
+        model = ProposedXMISTModel(feature_dim=feat_dim, edge_mode="urgency_aware", dropout=dropout, **graph_kwargs)
     elif model_type == "baseline_rgb":
-        model = RGBBaselineModel(feature_dim=feat_dim)
+        model = RGBBaselineModel(feature_dim=feat_dim, dropout=dropout)
     elif model_type == "baseline_traj":
-        model = TrajectoryBaselineModel(feature_dim=feat_dim)
+        model = TrajectoryBaselineModel(feature_dim=feat_dim, dropout=dropout)
     elif model_type == "baseline_pose":
-        model = PoseBaselineModel(feature_dim=feat_dim)
+        model = PoseBaselineModel(feature_dim=feat_dim, dropout=dropout)
     elif model_type == "intentformer":
-        model = IntentFormerReproductionModel(feature_dim=feat_dim)
+        model = IntentFormerReproductionModel(feature_dim=feat_dim, dropout=dropout)
     else:
         raise ValueError(f"Unknown model type: {model_type}")
 
@@ -104,6 +121,10 @@ def build_model(model_type: str, config: dict, device: torch.device) -> torch.nn
 def main():
     args = parse_args()
     config = load_config(args.config)
+
+    config.setdefault("project", {})["model_variant"] = args.model
+    config["project"]["seed"] = args.seed
+    config["project"]["data_dir"] = args.data_dir
 
     # Set deterministic random seed
     import random
@@ -126,8 +147,8 @@ def main():
     if args.checkpoint_dir is not None:
         config["project"]["checkpoint_dir"] = args.checkpoint_dir
         os.makedirs(args.checkpoint_dir, exist_ok=True)
-    elif args.model != "proposed":
-        config["project"]["checkpoint_dir"] = os.path.join("experiments/checkpoints", args.model)
+    else:
+        config["project"]["checkpoint_dir"] = os.path.join("experiments/checkpoints", f"{args.model}_seed{args.seed}")
         os.makedirs(config["project"]["checkpoint_dir"], exist_ok=True)
 
     # Distributed setup
@@ -152,8 +173,11 @@ def main():
         train_ds = SyntheticMultimodalDataset(num_samples=128, window_size=window_size, seed=42)
         val_ds = SyntheticMultimodalDataset(num_samples=32, window_size=window_size, seed=100)
     else:
+        # Fails loudly if the data directory is wrong (no silent synthetic fallback).
         train_ds = MultimodalSequenceDataset(data_dir=args.data_dir, split="train", window_size=window_size)
         val_ds = MultimodalSequenceDataset(data_dir=args.data_dir, split="val", window_size=window_size)
+        if rank == 0:
+            print(f"[Init] Train windows: {len(train_ds):,} | Val windows: {len(val_ds):,} | data_dir={args.data_dir}")
 
     train_sampler = DistributedSampler(train_ds, num_replicas=world_size, rank=rank) if is_distributed else None
     val_sampler = DistributedSampler(val_ds, num_replicas=world_size, rank=rank, shuffle=False) if is_distributed else None
@@ -164,7 +188,7 @@ def main():
         shuffle=(train_sampler is None),
         sampler=train_sampler,
         collate_fn=collate_multimodal_batch,
-        num_workers=0 if device.type == "cpu" else 2,
+        num_workers=0 if device.type == "cpu" else int(config["training"].get("num_workers", 2)),
         pin_memory=(device.type == "cuda")
     )
     val_loader = DataLoader(
@@ -173,14 +197,18 @@ def main():
         shuffle=False,
         sampler=val_sampler,
         collate_fn=collate_multimodal_batch,
-        num_workers=0 if device.type == "cpu" else 2,
+        num_workers=0 if device.type == "cpu" else int(config["training"].get("num_workers", 2)),
         pin_memory=(device.type == "cuda")
     )
 
     # Build Model
     model = build_model(args.model, config, device)
+    if rank == 0:
+        n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"[Init] Model '{args.model}': {n_params:,} trainable parameters")
     if is_distributed:
-        model = DDP(model, device_ids=[local_rank] if device.type == "cuda" else None, find_unused_parameters=True)
+        model = DDP(model, device_ids=[local_rank] if device.type == "cuda" else None,
+                    find_unused_parameters=bool(config.get("hpc", {}).get("find_unused_parameters", True)))
 
     # Initialize Trainer
     trainer = Trainer(
@@ -194,6 +222,8 @@ def main():
     )
 
     if args.resume:
+        if not os.path.exists(args.resume):
+            raise FileNotFoundError(f"--resume checkpoint not found: {args.resume}")
         trainer.load_checkpoint(args.resume, override_lr=args.lr)
 
     # Fit Model

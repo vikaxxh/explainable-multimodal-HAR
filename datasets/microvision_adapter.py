@@ -63,18 +63,6 @@ class MicroVisionEvaluator:
                 "No annotation file found at specified path. "
                 "Ensure MicroVision annotations (JSON / COCO format) are downloaded."
             )
-            # Fill with mock inspection metrics for demonstration
-            report.update({
-                "total_annotations": 12500,
-                "escooter_instances": 3400,
-                "bicycle_instances": 2100,
-                "pedestrian_instances": 4800,
-                "has_escooter_class": True,
-                "tracks_with_sufficient_length": 850,
-                "pedestrian_scooter_co_occurrences": 620,
-                "suitability_score": 88.5,
-                "recommendation": "SUITABLE: MicroVision has dense e-scooter annotations and frequent pedestrian co-occurrences. Ready for Phase 15 Interaction Modeling."
-            })
             return report
 
         try:
@@ -150,6 +138,12 @@ class MicroVisionAdapter:
         self.dt = 1.0 / fps
 
     def extract_scooter_sequences(self, max_samples: Optional[int] = None) -> List[Dict[str, Any]]:
+        raise NotImplementedError(
+            "MicroVision ingestion is not implemented: this method only generated SYNTHETIC e-scooter "
+            "sequences. Pass --max_micro_samples -1 to preprocess_multidataset.py."
+        )
+
+    def _synthetic_scooter_sequences(self, max_samples: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Extracts temporal sequence windows (T=32) centered on e-scooters or
         pedestrians interacting with e-scooters.

@@ -1,0 +1,17 @@
+#!/bin/bash
+#PBS -N cvmi_eval_val
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o cvmi_eval_val.log
+# Validation-split evaluation (test split stays untouched until the protocol note is written).
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+PY="$HOME/.conda/envs/emit-har/bin/python"
+export PYTHONUNBUFFERED=1
+C=experiments/checkpoints/cvmi
+$PY tools/eval_paper.py --data_dir data/processed_pie_tte --split val \
+  --full_ckpts $C/traj_full_seed42/checkpoint_best.pt $C/traj_full_seed100/checkpoint_best.pt $C/traj_full_seed2024/checkpoint_best.pt \
+  --iso_ckpts  $C/traj_isolated_seed42/checkpoint_best.pt $C/traj_isolated_seed100/checkpoint_best.pt $C/traj_isolated_seed2024/checkpoint_best.pt \
+  --output_dir experiments/results/cvmi_val

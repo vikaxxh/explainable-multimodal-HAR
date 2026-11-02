@@ -164,7 +164,15 @@ class PIEAdapter:
                             if aname == "id" and not track_id:
                                 track_id = atext
                             if "cross" in aname:
-                                cross_val = 1 if atext.lower() in ["1", "true", "yes", "crossing"] else 0
+                                a_low = atext.lower()
+                                if a_low in ["1", "true", "yes", "crossing"]:
+                                    cross_val = 1
+                                elif "irrelevant" in a_low or a_low == "-1":
+                                    # PIE marks far-away / non-relevant pedestrians as 'crossing-irrelevant'.
+                                    # Kept distinct (-1) so they can be excluded from the intention benchmark.
+                                    cross_val = -1
+                                else:
+                                    cross_val = 0
                             if "action" in aname:
                                 action_val = 1 if "walk" in atext.lower() else 0
                         cross_flags.append(cross_val)
@@ -455,3 +463,150 @@ class PIEAdapter:
 
         print(f"[PIEAdapter] Split counts: Train={len(train_seqs)}, Val={len(val_seqs)}, Test(Set03)={len(test_seqs)}")
         return {"train": train_seqs, "val": val_seqs, "test": test_seqs}
+
+    # ------------------------------------------------------------------
+    # Standard intention-prediction protocol (Kotseruba et al., WACV 2021 / PCPA style)
+    # ------------------------------------------------------------------
+    def extract_tte_sequences(
+        self,
+        pie_data: Dict[str, Any],
+        set_filter: Optional[List[str]] = None,
+        obs_len: int = 16,
+        tte_range: Tuple[int, int] = (30, 60),
+        overlap: float = 0.6,
+        fps: float = 30.0,
+        num_neighbors: int = 4,
+        neighbor_radius: float = 0.20,
+        image_size: Tuple[float, float] = (1920.0, 1080.0),
+    ) -> List[Dict[str, Any]]:
+        """
+        Builds observation windows that END 30-60 frames (1-2 s at 30 fps) BEFORE the crossing event.
+
+        - Crossing pedestrian: event frame = first frame annotated 'crossing'. Label 1.
+        - Non-crossing pedestrian: event frame = last annotated frame of the track. Label 0.
+        - Pedestrians annotated only as 'crossing-irrelevant' are excluded.
+        - The label is therefore NEVER visible inside the observed frames: every observed frame
+          precedes the crossing onset by at least tte_range[0] frames.
+        - Windows of obs_len frames are slid with the given overlap so that their last frame lies in
+          [event - tte_range[1], event - tte_range[0]].
+        Kinematics use dt = 1 / fps (PIE is annotated at 30 fps).
+        Coordinates are box centres normalised by image size (x / 1920, y / 1080).
+        """
+        dt = 1.0 / fps
+        stride = max(1, int(round(obs_len * (1.0 - overlap))))
+        W, H = image_size
+        tte_lo, tte_hi = tte_range
+        sequences: List[Dict[str, Any]] = []
+        stats = {"tracks_seen": 0, "irrelevant": 0, "too_short": 0, "used_tracks": 0, "crossing_tracks": 0}
+
+        def centres(box_list):
+            return np.array([[(b[0] + b[2] / 2.0) / W, (b[1] + b[3] / 2.0) / H] for b in box_list], dtype=np.float32)
+
+        for set_id, videos in pie_data.items():
+            if not isinstance(videos, dict):
+                continue
+            if set_filter is not None and set_id not in set_filter:
+                continue
+
+            for video_id, video_content in videos.items():
+                if not isinstance(video_content, dict):
+                    continue
+                ped_annotations = video_content.get("ped_annotations", {})
+                vehicle_annotations = video_content.get("vehicle_annotations", {})
+
+                frame_index: Dict[str, Dict[int, List[float]]] = {}
+                agent_type: Dict[str, str] = {}
+                # Keys are namespaced so a vehicle id equal to a pedestrian id cannot overwrite it
+                for p_id, p_data in ped_annotations.items():
+                    frame_index[f"ped:{p_id}"] = dict(zip(p_data.get("frames", []), p_data.get("bbox", [])))
+                    agent_type[f"ped:{p_id}"] = "pedestrian"
+                for v_id, v_data in vehicle_annotations.items():
+                    frame_index[f"veh:{v_id}"] = dict(zip(v_data.get("frames", []), v_data.get("bbox", [])))
+                    agent_type[f"veh:{v_id}"] = str(v_data.get("type", "vehicle"))
+
+                for ped_id, ped_data in ped_annotations.items():
+                    stats["tracks_seen"] += 1
+                    frames = list(ped_data["frames"])
+                    boxes = list(ped_data["bbox"])
+                    cross = list(ped_data.get("cross", [0] * len(boxes)))
+
+                    order = np.argsort(frames)
+                    frames = [frames[i] for i in order]
+                    boxes = [boxes[i] for i in order]
+                    cross = [cross[i] for i in order]
+
+                    if all(c == -1 for c in cross):
+                        stats["irrelevant"] += 1
+                        continue
+
+                    crossing_idx = [i for i, c in enumerate(cross) if c == 1]
+                    label = 1 if crossing_idx else 0
+                    event_idx = crossing_idx[0] if label == 1 else len(frames) - 1
+                    event_frame = frames[event_idx]
+                    f2i = {f: i for i, f in enumerate(frames)}
+
+                    made_any = False
+                    # Last observed frame runs from (event - tte_hi) to (event - tte_lo)
+                    for end_frame in range(event_frame - tte_hi, event_frame - tte_lo + 1, stride):
+                        start_frame = end_frame - obs_len + 1
+                        win_frames = list(range(start_frame, end_frame + 1))
+                        if any(f not in f2i for f in win_frames):
+                            continue  # needs contiguous annotation over the whole observation
+                        idxs = [f2i[f] for f in win_frames]
+                        win_boxes = [boxes[i] for i in idxs]
+                        c_p = centres(win_boxes)
+                        primary = compute_kinematics(c_p, dt=dt)
+
+                        # Neighbours: agents annotated in every observed frame, closest by mean distance
+                        cands = []
+                        for other_id, fdict in frame_index.items():
+                            if other_id == f"ped:{ped_id}":
+                                continue
+                            if all(f in fdict for f in win_frames):
+                                c_o = centres([fdict[f] for f in win_frames])
+                                d = float(np.mean(np.linalg.norm(c_p - c_o, axis=-1)))
+                                if d <= neighbor_radius:
+                                    cands.append((d, other_id, c_o))
+                        cands.sort(key=lambda x: x[0])
+
+                        n_agents = np.zeros((obs_len, num_neighbors, 5), dtype=np.float32)
+                        n_mask = np.zeros((obs_len, num_neighbors), dtype=bool)
+                        n_types = []
+                        for k, (_, oid, c_o) in enumerate(cands[:num_neighbors]):
+                            n_agents[:, k, :] = compute_kinematics(c_o, dt=dt)
+                            n_mask[:, k] = True
+                            n_types.append(agent_type[oid])
+
+                        win_actions = [ped_data.get("actions", [1] * len(boxes))[order[i]] for i in idxs]
+                        sample = {
+                            "trajectory": primary.astype(np.float32),
+                            "bbox": np.array([[b[0] / W, b[1] / H, b[2] / W, b[3] / H] for b in win_boxes], dtype=np.float32),
+                            "neighbor_agents": n_agents,
+                            "neighbor_mask": n_mask,
+                            "cross": int(label),
+                            "action": int(np.mean(win_actions) > 0.5),
+                            "ped_label": 0,
+                            "micro_label": 0,
+                            "inter_label": 0,
+                            "agent_type": "pedestrian",
+                            "metadata": {
+                                "dataset": "PIE", "protocol": "tte_30_60_obs16",
+                                "set_id": set_id, "video_id": video_id, "ped_id": ped_id,
+                                "event_frame": int(event_frame), "obs_end_frame": int(end_frame),
+                                "tte_frames": int(event_frame - end_frame),
+                                "neighbor_types": n_types,
+                            },
+                        }
+                        sequences.append(sample)
+                        made_any = True
+
+                    if made_any:
+                        stats["used_tracks"] += 1
+                        stats["crossing_tracks"] += label
+                    else:
+                        stats["too_short"] += 1
+
+        n_pos = sum(s["cross"] for s in sequences)
+        print(f"[PIEAdapter][TTE] sets={set_filter} windows={len(sequences)} (crossing={n_pos}, "
+              f"not-crossing={len(sequences) - n_pos}) | {stats}")
+        return sequences

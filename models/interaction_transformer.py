@@ -61,17 +61,21 @@ class DynamicInteractionTransformer(nn.Module):
             for _ in range(num_layers)
         ])
 
-        # Fusion network to combine F_{multi} and F_{interaction}
-        self.fusion_gate = nn.Sequential(
-            nn.Linear(feature_dim * 2, feature_dim),
-            nn.Sigmoid()
-        )
+        # Learned token used when a pedestrian has NO valid neighbour at a timestep.
+        # (Previously padded slot 0 was un-masked, so "no neighbour" windows attended to a zero agent
+        #  whose edge features re-encoded the pedestrian's own position/speed/heading.)
+        self.no_neighbor_token = nn.Parameter(torch.zeros(1, 1, feature_dim))
+
+        # Residual fusion: F_final = LN(F_multi + Proj(F_interaction)).
+        # With no neighbours the added term is a learned constant, so the only extra information the
+        # interaction model receives over the isolated model comes from actual neighbours.
         self.fusion_projector = nn.Sequential(
-            nn.Linear(feature_dim * 2, feature_dim),
-            nn.LayerNorm(feature_dim),
+            nn.Linear(feature_dim, feature_dim),
             nn.ReLU(inplace=True),
-            nn.Dropout(dropout)
+            nn.Dropout(dropout),
+            nn.Linear(feature_dim, feature_dim)
         )
+        self.fusion_norm = nn.LayerNorm(feature_dim)
 
     def forward(
         self,
@@ -104,46 +108,41 @@ class DynamicInteractionTransformer(nn.Module):
         # Prepare for attention over N neighbors:
         # Query = Primary agent (B*T, 1, d)
         # Key, Value = Neighbor agents (B*T, N, d)
-        q = p_tokens.view(B * T, 1, self.feature_dim)
-        kv = n_tokens.view(B * T, N, self.feature_dim)
+        q = p_tokens.reshape(B * T, 1, self.feature_dim)
+        kv = n_tokens.reshape(B * T, N, self.feature_dim)
 
         # Mask invalid neighbors: key_padding_mask is True for padded/invalid keys
-        # adj_mask: (B, T, N) -> False means disconnected / pad
-        key_padding_mask = ~adj_mask.view(B * T, N)
+        key_padding_mask = ~adj_mask.reshape(B * T, N)
 
-        # If a row has all neighbors masked out, unmask first to avoid NaN in softmax
+        # Rows with no valid neighbour: unmask slot 0 only to keep softmax finite; their outputs are
+        # replaced by the learned no-neighbour token below and their attention weights set to 0.
         all_masked = key_padding_mask.all(dim=1)
-        if all_masked.any():
-            key_padding_mask = key_padding_mask.clone()
-            key_padding_mask[all_masked, 0] = False
+        safe_mask = key_padding_mask.clone()
+        safe_mask[all_masked, 0] = False
 
         h = q
         last_attn_weights = None
 
         for layer in self.layers:
-            attn_module = layer["attn"]
-            attn_out, attn_w = attn_module(
-                query=h,
-                key=kv,
-                value=kv,
-                key_padding_mask=key_padding_mask,
+            attn_out, attn_w = layer["attn"](
+                query=h, key=kv, value=kv,
+                key_padding_mask=safe_mask,
                 need_weights=True
             )
             attn_out = torch.nan_to_num(attn_out, nan=0.0)
-            attn_w = torch.nan_to_num(attn_w, nan=0.0)
-            last_attn_weights = attn_w  # (B*T, 1, N)
+            last_attn_weights = torch.nan_to_num(attn_w, nan=0.0)  # (B*T, 1, N)
             h = layer["norm1"](h + attn_out)
             h = layer["norm2"](h + layer["ffn"](h))
 
-        f_interaction = h.view(B, T, self.feature_dim)  # (B, T, d)
-        f_interaction = torch.nan_to_num(f_interaction, nan=0.0)
-        interaction_weights = last_attn_weights.view(B, T, N) # (B, T, N)
+        empty = all_masked.view(B * T, 1, 1)
+        h = torch.where(empty, self.no_neighbor_token.expand(B * T, 1, self.feature_dim).to(h.dtype), h)
+        last_attn_weights = last_attn_weights.masked_fill(empty, 0.0)
 
-        # Fuse F_{multi} and F_{interaction} (Phase 17)
-        concat_rep = torch.cat([f_multi, f_interaction], dim=-1)
-        alpha = self.fusion_gate(concat_rep)
-        f_final = alpha * f_multi + (1.0 - alpha) * f_interaction
-        f_final = self.fusion_projector(concat_rep)
+        f_interaction = torch.nan_to_num(h.reshape(B, T, self.feature_dim), nan=0.0)
+        interaction_weights = last_attn_weights.reshape(B, T, N)
+
+        # Residual fusion (Phase 17)
+        f_final = self.fusion_norm(f_multi + self.fusion_projector(f_interaction))
         f_final = torch.nan_to_num(f_final, nan=0.0)
 
         return f_final, f_interaction, interaction_weights

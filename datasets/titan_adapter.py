@@ -75,8 +75,7 @@ class TITANAdapter:
 
         # 3. Fallback: Provide informative log and generate high-fidelity simulated sequences
         print(f"[TITANAdapter] No raw TITAN files (.csv / .json) found in '{search_dir}'.")
-        print("[TITANAdapter] Generating simulated high-fidelity TITAN multi-agent interaction sequences for dry-run/pipeline integration.")
-        return self._generate_mock_titan_structure()
+        raise FileNotFoundError(f"[TITANAdapter] No TITAN annotations in '{search_dir}' (synthetic fallback removed).")
 
     def _parse_titan_csv_files(self, csv_files: List[str]) -> Dict[str, Any]:
         """Parses Honda TITAN CSV format into structured tracks."""

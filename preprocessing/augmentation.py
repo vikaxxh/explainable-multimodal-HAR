@@ -1,11 +1,18 @@
 """
-Advanced Multimodal Data Augmentation Suite for 95+% Accuracy.
-Improves generalization and prevents overfitting on minority behavior classes:
-1. SE(2) Trajectory Rotation: Rotates trajectory coordinates by angle theta in [-pi, pi]
-2. Velocity Scaling: Random speed jitter (+/- 15%)
-3. Temporal Subsampling & Jitter: Random temporal dilation
-4. Skeletal Keypoint Masking: Randomly drops 1-3 joints to simulate partial occlusion
-5. Modality Dropout: Randomly masks 1 modality during training to force cross-modal redundancy
+Multimodal Data Augmentation.
+
+Coordinates are image-plane box centres normalised to [0, 1] (x / width, y / height), so only
+augmentations that keep a plausible dashcam geometry are enabled by default:
+
+1. Horizontal flip (default OFF; set prob_hflip for [0, 1]-normalised data):  x -> 1 - x, vx -> -vx, heading -> pi - heading
+   (applied identically to the pedestrian and all valid neighbours).
+2. Rotation (default OFF): rotating image coordinates about the image corner is not physically
+   meaningful for a forward-facing camera. Kept only for synthetic / bird's-eye data. The rotation is
+   now applied consistently to positions, velocities and heading (previously positions/velocities
+   were rotated by -theta while heading was shifted by +theta).
+3. Velocity scaling (default OFF): scaling velocities without rescaling positions produces
+   physically inconsistent tracks.
+4. Joint masking / modality dropout: only act on modalities present in the batch.
 """
 
 import math
@@ -14,75 +21,93 @@ import numpy as np
 from typing import Dict, Any
 
 
+def _wrap(angle: torch.Tensor) -> torch.Tensor:
+    return torch.remainder(angle + math.pi, 2 * math.pi) - math.pi
+
+
 class MultimodalAugmentor:
-    """
-    Applies physics-consistent geometric and temporal augmentations to multimodal batches.
-    """
 
     def __init__(
         self,
-        prob_rotation: float = 0.5,
-        prob_speed_scale: float = 0.5,
+        prob_hflip: float = 0.0,
+        prob_rotation: float = 0.0,
+        prob_speed_scale: float = 0.0,
         prob_joint_mask: float = 0.3,
-        prob_modality_dropout: float = 0.2
+        prob_modality_dropout: float = 0.0,
     ):
+        self.prob_hflip = prob_hflip
         self.prob_rotation = prob_rotation
         self.prob_speed_scale = prob_speed_scale
         self.prob_joint_mask = prob_joint_mask
         self.prob_modality_dropout = prob_modality_dropout
 
-    def augment_batch(self, batch: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
-        """
-        Applies in-place or cloned transformations on torch tensors.
-        """
-        aug_batch = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-        device = aug_batch["trajectory"].device
-        B, T, _ = aug_batch["trajectory"].shape
+    @staticmethod
+    def hflip_tracks(traj: torch.Tensor) -> torch.Tensor:
+        """traj (..., 5) [x, y, vx, vy, heading] in normalised image coords."""
+        out = traj.clone()
+        out[..., 0] = 1.0 - traj[..., 0]
+        out[..., 2] = -traj[..., 2]
+        out[..., 4] = _wrap(math.pi - traj[..., 4])
+        return out
 
-        # 1. SE(2) Coordinate Rotation on Trajectory & Neighbors
-        if np.random.rand() < self.prob_rotation:
+    @staticmethod
+    def rotate_tracks(traj: torch.Tensor, angle: float) -> torch.Tensor:
+        """Counter-clockwise rotation by `angle` applied consistently to position, velocity and heading."""
+        c, s = math.cos(angle), math.sin(angle)
+        out = traj.clone()
+        x, y, vx, vy = traj[..., 0], traj[..., 1], traj[..., 2], traj[..., 3]
+        out[..., 0] = c * x - s * y
+        out[..., 1] = s * x + c * y
+        out[..., 2] = c * vx - s * vy
+        out[..., 3] = s * vx + c * vy
+        out[..., 4] = _wrap(traj[..., 4] + angle)
+        return out
+
+    def augment_batch(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        aug = {k: v.clone() if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
+        B = aug["trajectory"].shape[0]
+        has_nb = "neighbor_agents" in aug and "neighbor_mask" in aug
+
+        # 1. Per-sample horizontal flip
+        if self.prob_hflip > 0:
+            flip = torch.from_numpy(np.random.rand(B) < self.prob_hflip).to(aug["trajectory"].device)
+            if flip.any():
+                aug["trajectory"][flip] = self.hflip_tracks(aug["trajectory"][flip])
+                if has_nb:
+                    nb = aug["neighbor_agents"][flip]
+                    nb_flipped = self.hflip_tracks(nb)
+                    valid = aug["neighbor_mask"][flip].unsqueeze(-1)
+                    aug["neighbor_agents"][flip] = torch.where(valid, nb_flipped, nb)  # keep padding at zero
+                if "bbox" in aug:
+                    bb = aug["bbox"][flip]
+                    bb[..., 0] = 1.0 - bb[..., 0] - bb[..., 2]
+                    aug["bbox"][flip] = bb
+
+        # 2. Rotation (batch-wide angle), off by default
+        if self.prob_rotation > 0 and np.random.rand() < self.prob_rotation:
             angle = float(np.random.uniform(-math.pi, math.pi))
-            cos_a = math.cos(angle)
-            sin_a = math.sin(angle)
-            rot_mat = torch.tensor([[cos_a, -sin_a], [sin_a, cos_a]], device=device, dtype=torch.float32)
+            aug["trajectory"] = self.rotate_tracks(aug["trajectory"], angle)
+            if has_nb:
+                rot = self.rotate_tracks(aug["neighbor_agents"], angle)
+                aug["neighbor_agents"] = torch.where(aug["neighbor_mask"].unsqueeze(-1), rot, aug["neighbor_agents"])
 
-            # Rotate primary positions & velocities
-            pos = aug_batch["trajectory"][:, :, :2]
-            vel = aug_batch["trajectory"][:, :, 2:4]
-            head = aug_batch["trajectory"][:, :, 4:5]
-
-            aug_batch["trajectory"][:, :, :2] = torch.matmul(pos, rot_mat)
-            aug_batch["trajectory"][:, :, 2:4] = torch.matmul(vel, rot_mat)
-            aug_batch["trajectory"][:, :, 4:5] = torch.remainder(head + angle + math.pi, 2 * math.pi) - math.pi
-
-            # Rotate neighbor agents if present
-            if "neighbor_agents" in aug_batch:
-                n_pos = aug_batch["neighbor_agents"][:, :, :, :2]
-                n_vel = aug_batch["neighbor_agents"][:, :, :, 2:4]
-                n_head = aug_batch["neighbor_agents"][:, :, :, 4:5]
-
-                aug_batch["neighbor_agents"][:, :, :, :2] = torch.matmul(n_pos, rot_mat)
-                aug_batch["neighbor_agents"][:, :, :, 2:4] = torch.matmul(n_vel, rot_mat)
-                aug_batch["neighbor_agents"][:, :, :, 4:5] = torch.remainder(n_head + angle + math.pi, 2 * math.pi) - math.pi
-
-        # 2. Velocity Scaling
-        if np.random.rand() < self.prob_speed_scale:
+        # 3. Velocity scaling, off by default
+        if self.prob_speed_scale > 0 and np.random.rand() < self.prob_speed_scale:
             scale = float(np.random.uniform(0.85, 1.15))
-            aug_batch["trajectory"][:, :, 2:4] *= scale
-            if "neighbor_agents" in aug_batch:
-                aug_batch["neighbor_agents"][:, :, :, 2:4] *= scale
+            aug["trajectory"][..., 2:4] *= scale
+            if has_nb:
+                aug["neighbor_agents"][..., 2:4] *= scale
 
-        # 3. Skeletal Keypoint Occlusion / Masking
-        if np.random.rand() < self.prob_joint_mask and "pose" in aug_batch:
-            # Drop 2 random joints across all frames
-            num_joints = aug_batch["pose"].shape[2]
-            masked_joints = np.random.choice(num_joints, size=2, replace=False)
-            aug_batch["pose"][:, :, masked_joints, :] = 0.0
+        # 4. Joint masking (only if real pose present)
+        if "pose" in aug and self.prob_joint_mask > 0 and np.random.rand() < self.prob_joint_mask:
+            num_joints = aug["pose"].shape[2]
+            masked = np.random.choice(num_joints, size=min(2, num_joints), replace=False)
+            aug["pose"][:, :, masked, :] = 0.0
 
-        # 4. Modality Dropout (Forces robust cross-modal representation)
-        if np.random.rand() < self.prob_modality_dropout:
-            mod_choice = np.random.choice(["rgb", "pose", "scene"])
-            if mod_choice in aug_batch:
-                aug_batch[mod_choice].zero_()
+        # 5. Modality dropout (only among modalities present)
+        if self.prob_modality_dropout > 0 and np.random.rand() < self.prob_modality_dropout:
+            present = [m for m in ["rgb", "pose", "scene"] if m in aug]
+            if present:
+                aug[np.random.choice(present)].zero_()
 
-        return aug_batch
+        return aug

@@ -23,10 +23,17 @@ class DynamicInteractionGraph(nn.Module):
         edge_dim: int = 4,
         edge_embed_dim: int = 64,
         distance_threshold: float = 12.0,
-        edge_mode: str = "full"
+        edge_mode: str = "full",
+        min_closing_speed: float = 1e-3,
+        ttc_cap: float = 10.0
     ):
         super().__init__()
         self.edge_mode = edge_mode
+        # Closing speed (in input units per second) above which a finite TTC is computed.
+        # Must match the coordinate scale: with normalised image coordinates and dt = 1/30 s,
+        # typical pedestrian speeds are ~0.01-0.1 units/s, so a threshold of 0.1 would make TTC constant.
+        self.min_closing_speed = min_closing_speed
+        self.ttc_cap = ttc_cap
         self.distance_threshold = distance_threshold
         self.edge_embed_dim = edge_embed_dim
 
@@ -93,8 +100,13 @@ class DynamicInteractionGraph(nn.Module):
         closing_speed = -torch.sum(rel_vel * unit_rel, dim=-1, keepdim=True)
         # Note: Do NOT clamp closing_speed to min=0.0; negative values indicate separating agents!
 
-        ttc = torch.where(closing_speed > 0.1, dist / (torch.clamp(closing_speed, min=1e-3) + eps), torch.tensor(10.0, device=dist.device))
-        ttc = torch.clamp(ttc, 0.0, 10.0)                # (B, T, N, 1)
+        cap = torch.tensor(self.ttc_cap, device=dist.device, dtype=dist.dtype)
+        ttc = torch.where(
+            closing_speed > self.min_closing_speed,
+            dist / (torch.clamp(closing_speed, min=self.min_closing_speed) + eps),
+            cap,
+        )
+        ttc = torch.clamp(ttc, 0.0, self.ttc_cap)        # (B, T, N, 1)
 
         # Edge feature construction based on edge_mode
         if self.edge_mode == "proximity_only":
@@ -103,7 +115,7 @@ class DynamicInteractionGraph(nn.Module):
             edge_feats = torch.cat([dist, closing_speed, ttc], dim=-1)  # (B, T, N, 3) Closing kinematics & TTC
         else:
             edge_feats = torch.cat([dist, delta_v, delta_theta, ttc], dim=-1)  # (B, T, N, 4) Full relational features
-        edge_feats = torch.nan_to_num(edge_feats, nan=0.0, posinf=10.0, neginf=0.0)
+        edge_feats = torch.nan_to_num(edge_feats, nan=0.0, posinf=self.ttc_cap, neginf=0.0)
 
         # Connectivity mask: must be within threshold and marked active in neighbor_mask
         adj_mask = (dist.squeeze(-1) <= self.distance_threshold) & neighbor_mask

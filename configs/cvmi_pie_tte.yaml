@@ -1,0 +1,174 @@
+# ==============================================================================
+# CVMI 2027 paper configuration: PIE crossing intention, trajectory + neighbours
+#  - observation 16 frames @ 30 fps, prediction horizon 30-60 frames (1-2 s) before crossing
+#  - single task (crossing), no placeholder RGB/pose/scene inputs
+#  - distance_threshold is in normalised image units (neighbours are pre-filtered at 0.20,
+#    so 10.0 means "no extra pruning"); min_closing_speed in image-units/s for finite TTC
+# ==============================================================================
+project:
+  name: cvmi2027_pie_tte
+  seed: 42
+  device: cuda
+  output_dir: experiments/results
+  checkpoint_dir: experiments/checkpoints
+  log_dir: experiments/logs
+taxonomy:
+  agent_types:
+  - pedestrian
+  - bicycle
+  - escooter
+  - vehicle
+  pedestrian_classes:
+  - Walking
+  - Standing
+  - Stopping
+  - Starting
+  - Turning
+  - Crossing
+  - Yielding
+  - Avoiding
+  micromobility_classes:
+  - Moving
+  - Stopping
+  - Starting
+  - Turning
+  - Accelerating
+  - Decelerating
+  - Yielding
+  - Avoiding
+  - Overtaking
+  interaction_classes:
+  - Approaching
+  - Yielding
+  - Avoiding
+  - Overtaking
+  - Conflict
+  - Cooperative
+  scene_classes:
+  - road
+  - sidewalk
+  - crosswalk
+  - traffic_signal
+  - buildings
+  - obstacles
+  - vehicles
+  - cycling_lane
+  - pedestrian_area
+  - background
+data:
+  raw_dir: data/raw
+  pie_dir: data/raw/PIE
+  jaad_dir: data/raw/JAAD
+  titan_dir: data/raw/TITAN
+  microvision_dir: data/raw/MicroVision
+  processed_dir: data/processed_pie_tte
+  annotations_dir: data/annotations
+  splits_dir: data/splits
+  window_size: 16
+  stride: 8
+  fps: 30.0
+  max_agents: 4
+  image_size:
+  - 224
+  - 224
+  num_joints: 18
+  joint_dim: 3
+  traj_dim: 5
+  dt: 0.03333333333333333
+  obs_len: 16
+  tte_range:
+  - 30
+  - 60
+  overlap: 0.6
+model:
+  feature_dim: 256
+  dropout: 0.3
+  rgb_encoder:
+    backbone: resnet18
+    pretrained: false
+    in_channels: 3
+    temporal_pool: adaptive
+  pose_encoder:
+    num_joints: 18
+    joint_dim: 3
+    hidden_dim: 256
+    num_layers: 2
+    dropout: 0.1
+  trajectory_encoder:
+    input_dim: 5
+    hidden_dim: 256
+    num_layers: 2
+    dropout: 0.1
+  scene_encoder:
+    num_classes: 10
+    hidden_dim: 256
+    dropout: 0.1
+  cross_modal:
+    enabled: true
+    num_heads: 4
+    dim_feedforward: 512
+    dropout: 0.1
+  modality_gating:
+    enabled: true
+    num_modalities: 4
+    reduction_ratio: 4
+  interaction:
+    enabled: true
+    edge_dim: 4
+    distance_threshold: 10.0
+    num_heads: 4
+    num_layers: 2
+    dropout: 0.1
+    min_closing_speed: 0.001
+  temporal:
+    num_heads: 4
+    num_layers: 3
+    dim_feedforward: 512
+    dropout: 0.1
+training:
+  epochs: 60
+  batch_size: 32
+  num_workers: 4
+  lr: 0.0001
+  min_lr: 1.0e-06
+  weight_decay: 0.01
+  warmup_epochs: 5
+  grad_clip: 1.0
+  mixed_precision: fp16
+  save_every: 5
+  eval_every: 1
+  early_stop_patience: 10
+  early_stop_metric: val_auc
+  loss_weights:
+    lambda_cross: 1.0
+    lambda_action: 0.0
+    lambda_ped: 0.0
+    lambda_micro: 0.0
+    lambda_inter: 0.0
+    lambda_align: 0.0
+    lambda_xai: 0.0
+    alpha_cross: 0.75
+    gamma: 2.0
+  use_augmentation: true
+  augmentation:
+    prob_hflip: 0.5
+    prob_rotation: 0.0
+    prob_speed_scale: 0.0
+    prob_joint_mask: 0.0
+    prob_modality_dropout: 0.0
+explainability:
+  methods:
+  - attention
+  - gradient
+  - perturbation
+  temporal_steps: 16
+  faithfulness:
+    deletion_steps: 5
+    insertion_steps: 5
+    perturbation_radius: 0.25
+hpc:
+  use_ddp: false
+  find_unused_parameters: true
+  sync_bn: true
+  wandb_project: emit-har-research
+  wandb_mode: offline

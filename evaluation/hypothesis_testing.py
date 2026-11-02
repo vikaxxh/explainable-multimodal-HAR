@@ -20,19 +20,25 @@ from typing import Dict, Any, List, Tuple, Callable, Optional
 
 def holm_bonferroni(p_values: List[float], alpha: float = 0.05) -> List[Tuple[float, bool]]:
     """
-    Applies Holm-Bonferroni step-down correction to a list of p-values.
-    Returns: List of (adjusted_p, is_significant)
+    Holm-Bonferroni step-down correction.
+    Adjusted p-values are made monotone (cumulative max) and testing stops at the first
+    non-rejected hypothesis, so a larger p-value can never be significant when a smaller one is not.
+    Returns: List of (adjusted_p, is_significant) in the original order.
     """
     m = len(p_values)
-    indexed = sorted(enumerate(p_values), key=lambda x: x[1])
-    results = [None] * m
-
-    for rank, (orig_idx, p) in enumerate(indexed):
-        crit = alpha / (m - rank)
-        adj_p = min(1.0, p * (m - rank))
-        is_sig = p <= crit
-        results[orig_idx] = (round(adj_p, 5), is_sig)
-
+    order = sorted(range(m), key=lambda i: p_values[i])
+    results: List[Tuple[float, bool]] = [None] * m  # type: ignore
+    running_max = 0.0
+    still_rejecting = True
+    for rank, idx in enumerate(order):
+        adj = min(1.0, p_values[idx] * (m - rank))
+        running_max = max(running_max, adj)
+        if still_rejecting and p_values[idx] <= alpha / (m - rank):
+            sig = True
+        else:
+            still_rejecting = False
+            sig = False
+        results[idx] = (round(running_max, 5), sig)
     return results
 
 
@@ -57,12 +63,14 @@ def cluster_bootstrap_ci(
     point_estimate = float(metric_fn(y_true, y_pred))
 
     if n_clusters < 5:
+        # No CI can be formed: return NaN bounds so "ci_lower > 0" can never be true by accident.
         return {
             "point_estimate": round(point_estimate, 4),
-            "ci_lower": round(point_estimate, 4),
-            "ci_upper": round(point_estimate, 4),
-            "std_error": 0.0,
-            "warning": "Fewer than 5 clusters; bootstrap CI uninformative."
+            "ci_lower": float("nan"),
+            "ci_upper": float("nan"),
+            "std_error": float("nan"),
+            "n_valid_resamples": 0,
+            "warning": "Fewer than 5 clusters; bootstrap CI not computed."
         }
 
     bootstrap_estimates = []
@@ -84,9 +92,11 @@ def cluster_bootstrap_ci(
     if len(bootstrap_estimates) < 100:
         return {
             "point_estimate": round(point_estimate, 4),
-            "ci_lower": round(point_estimate, 4),
-            "ci_upper": round(point_estimate, 4),
-            "std_error": 0.0
+            "ci_lower": float("nan"),
+            "ci_upper": float("nan"),
+            "std_error": float("nan"),
+            "n_valid_resamples": len(bootstrap_estimates),
+            "warning": "Fewer than 100 valid resamples; bootstrap CI not computed."
         }
 
     lower = float(np.percentile(bootstrap_estimates, 100 * (alpha / 2.0)))
@@ -97,7 +107,8 @@ def cluster_bootstrap_ci(
         "point_estimate": round(point_estimate, 4),
         "ci_lower": round(lower, 4),
         "ci_upper": round(upper, 4),
-        "std_error": round(se, 4)
+        "std_error": round(se, 4),
+        "n_valid_resamples": len(bootstrap_estimates)
     }
 
 
@@ -156,7 +167,8 @@ def evaluate_h2_stratified_utility(
         ci_auc = cluster_bootstrap_ci(auc_diff, y_s, p_s, c_s, num_bootstrap=num_bootstrap)
         ci_f1 = cluster_bootstrap_ci(f1_diff, y_s, p_s, c_s, num_bootstrap=num_bootstrap)
 
-        # H2 Decision Rule: Supported if CI excludes zero on K>=1, and includes zero on K=0
+        # Pre-registered primary metric is ΔAUC; ΔF1 is reported descriptively only
+        # (an AUC-or-F1 rule would be two uncorrected tests). NaN bounds compare False.
         excludes_zero_auc = bool(ci_auc["ci_lower"] > 0)
         excludes_zero_f1 = bool(ci_f1["ci_lower"] > 0)
 
@@ -165,7 +177,8 @@ def evaluate_h2_stratified_utility(
             "n_tracks": n_tracks,
             "delta_auc": ci_auc,
             "delta_f1": ci_f1,
-            "excludes_zero": excludes_zero_auc or excludes_zero_f1
+            "excludes_zero": excludes_zero_auc,
+            "excludes_zero_f1_descriptive": excludes_zero_f1
         }
 
     return results

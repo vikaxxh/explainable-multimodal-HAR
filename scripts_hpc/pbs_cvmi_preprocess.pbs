@@ -1,0 +1,15 @@
+#!/bin/bash
+#PBS -N cvmi_prep
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=02:00:00
+#PBS -j oe
+#PBS -o cvmi_preprocess.log
+# Builds PIE time-to-event dataset (obs 16 frames, 30-60 frames ahead) + sanity report.
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+PY="$HOME/.conda/envs/emit-har/bin/python"
+export PYTHONUNBUFFERED=1
+set -e
+$PY preprocess_pie_tte.py --pie_dir data/raw/PIE --output_dir data/processed_pie_tte --clean
+$PY tools/check_tte_data.py --data_dir data/processed_pie_tte

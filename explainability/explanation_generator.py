@@ -91,32 +91,23 @@ class HumanReadableExplanationGenerator:
             inter_xai = {"summary": "No interaction modeling available"}
             primary_agent = None
 
-        # 5. Spatial Attribution (Stage 7 of proposal)
-        spatial_breakdown = {
-            "Pedestrian": 45.0,
-            "Micromobility (Neighbor)": 35.0,
-            "Background Scene": 20.0
-        }
-        if primary_agent:
-            spatial_breakdown = {
-                "Primary Pedestrian": 48.0,
-                f"Interacting {primary_agent['agent_type']}": 38.0,
-                "Background Scene": 14.0
-            }
+        # 5. Spatial Attribution: not computed here (previously hard-coded placeholder percentages).
+        #    Use explainability/spatial_attribution.py for a perturbation-based estimate.
+        spatial_breakdown = {"(not computed)": 0.0}
 
         # 6. Extract Kinematic Behavioral Evidence from Trajectory
         traj = batch["trajectory"][sample_idx].detach().cpu().numpy() # (T, 5)
         v_init = np.linalg.norm(traj[0, 2:4])
         v_final = np.linalg.norm(traj[-1, 2:4])
-        heading_change_deg = np.degrees(np.abs(traj[-1, 4] - traj[0, 4]))
+        heading_change_deg = np.degrees(np.abs((traj[-1, 4] - traj[0, 4] + np.pi) % (2 * np.pi) - np.pi))
 
         evidence_bullets = []
         if primary_agent:
             evidence_bullets.append(f"Interacting {primary_agent['agent_type']} (ID: {primary_agent['agent_id']}) approached pedestrian path.")
         if v_final < v_init * 0.7:
-            evidence_bullets.append(f"Pedestrian slowed down significantly ({v_init:.2f} m/s -> {v_final:.2f} m/s).")
+            evidence_bullets.append(f"Pedestrian slowed down significantly ({v_init:.3f} -> {v_final:.3f} image-units/s).")
         elif v_final > v_init * 1.3:
-            evidence_bullets.append(f"Pedestrian accelerated ({v_init:.2f} m/s -> {v_final:.2f} m/s).")
+            evidence_bullets.append(f"Pedestrian accelerated ({v_init:.3f} -> {v_final:.3f} image-units/s).")
         if heading_change_deg > 15.0:
             evidence_bullets.append(f"Pedestrian adjusted heading trajectory by {heading_change_deg:.1f}°.")
         evidence_bullets.append(f"Dominant modality guiding decision: {max(modality_breakdown, key=modality_breakdown.get)}.")

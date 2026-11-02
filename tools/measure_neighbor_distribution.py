@@ -212,12 +212,10 @@ def main():
         print(f"  • Multi-Modal (Both Ped & Vehicle):     {ab['both']:4d} ({ab['both']/N*100:5.2f}%)")
         print(f"  • Total Tracks with Active Interaction: {N - ab['isolated']:4d} ({(N - ab['isolated'])/N*100:5.2f}%)")
         print("=" * 85)
-        print("\n[Scientific Conclusion for H1]:")
-        print("In official PIE Set 03, 95.7% of pedestrian tracks have surrounding traffic agents")
-        print("within standard interaction radius (R=0.20), refuting the sparse-neighbor hypothesis.")
-        print("This empirically establishes that interaction modeling is applicable to >95% of test cases,")
-        print("directly setting up the core diagnostic questions (H2 & H3): does the model genuinely exploit")
-        print("relational interaction dynamics, or merely capitalize on spatial proximity bias?")
+        share = (N - ab['isolated']) / N * 100
+        print(f"\n[H1 summary] {share:.1f}% of pedestrian tracks have >=1 agent within R=0.20 in at least one frame.")
+        print("Note: this per-frame definition differs from the training data, which requires a neighbour")
+        print("to be present in every observed frame with mean distance <= R.")
         print("=" * 85 + "\n")
 
 

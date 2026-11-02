@@ -44,9 +44,17 @@ class Trainer:
         self.device = device
         self.is_distributed = is_distributed
         self.rank = rank
-        self.augmentor = MultimodalAugmentor()
-
         cfg_train = config.get("training", {})
+        aug_cfg = cfg_train.get("augmentation", {})
+        self.augmentor = MultimodalAugmentor(
+            # Flip assumes x normalised to [0, 1]; only enabled when the config asks for it
+            prob_hflip=float(aug_cfg.get("prob_hflip", 0.0)),
+            prob_rotation=float(aug_cfg.get("prob_rotation", 0.0)),
+            prob_speed_scale=float(aug_cfg.get("prob_speed_scale", 0.0)),
+            prob_joint_mask=float(aug_cfg.get("prob_joint_mask", 0.3)),
+            prob_modality_dropout=float(aug_cfg.get("prob_modality_dropout", 0.0)),
+        )
+        self.use_augmentation = bool(cfg_train.get("use_augmentation", True))
         self.epochs = int(cfg_train.get("epochs", 50))
         self.lr = float(cfg_train.get("lr", 1e-4))
         self.weight_decay = float(cfg_train.get("weight_decay", 1e-4))
@@ -101,6 +109,14 @@ class Trainer:
         self.best_val_loss = float("inf")
         self.start_epoch = 0
 
+    def _autocast(self):
+        enabled = (self.mixed_precision in ["fp16", "bf16"] and self.device.type == "cuda")
+        dtype = torch.bfloat16 if self.mixed_precision == "bf16" else torch.float16
+        try:
+            return torch.amp.autocast("cuda", enabled=enabled, dtype=dtype)
+        except (AttributeError, TypeError):
+            return torch.cuda.amp.autocast(enabled=enabled, dtype=dtype)
+
     def train_epoch(self, epoch: int) -> Dict[str, float]:
         self.model.train()
         total_loss = 0.0
@@ -110,23 +126,20 @@ class Trainer:
 
         for batch_idx, batch in enumerate(self.train_loader):
             # Apply physics-consistent multimodal data augmentation
-            batch = self.augmentor.augment_batch(batch)
+            if self.use_augmentation:
+                batch = self.augmentor.augment_batch(batch)
             # Move to device
             batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
 
             self.optimizer.zero_grad()
 
-            amp_enabled = (self.mixed_precision in ["fp16", "bf16"] and self.device.type == "cuda")
-            try:
-                autocast_ctx = torch.amp.autocast('cuda', enabled=amp_enabled)
-            except (AttributeError, TypeError):
-                autocast_ctx = torch.cuda.amp.autocast(enabled=amp_enabled)
-
-            with autocast_ctx:
+            with self._autocast():
                 outputs = self.model(batch)
                 loss_dict = self.criterion(outputs, batch)
                 loss = loss_dict["loss_total"]
 
+            if not torch.is_tensor(loss):
+                raise RuntimeError("No active loss term: check loss_weights and model outputs")
             self.scaler.scale(loss).backward()
             if self.grad_clip > 0:
                 self.scaler.unscale_(self.optimizer)
@@ -164,15 +177,9 @@ class Trainer:
         all_cross_preds = []
         all_cross_true = []
 
-        amp_enabled = (self.mixed_precision in ["fp16", "bf16"] and self.device.type == "cuda")
-        try:
-            autocast_ctx = torch.amp.autocast('cuda', enabled=amp_enabled)
-        except (AttributeError, TypeError):
-            autocast_ctx = torch.cuda.amp.autocast(enabled=amp_enabled)
-
         for batch in self.val_loader:
             batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v for k, v in batch.items()}
-            with autocast_ctx:
+            with self._autocast():
                 outputs = self.model(batch)
                 loss_dict = self.criterion(outputs, batch)
                 loss = loss_dict["loss_total"]
@@ -302,7 +309,15 @@ class Trainer:
             duration = time.time() - t0
 
             # Check improvement based on early_stop_metric
-            current_metric = val_metrics.get(self.early_stop_metric, val_metrics["val_loss"])
+            if self.early_stop_metric not in val_metrics:
+                # e.g. baselines without a crossing head: fall back to val_loss AND minimise it
+                if self.rank == 0 and epoch == self.start_epoch:
+                    print(f"[Trainer] WARNING: '{self.early_stop_metric}' not available; selecting on val_loss (minimised).")
+                self.early_stop_metric = "val_loss"
+                self.is_maximize = False
+                if self.best_metric_val == -float("inf"):
+                    self.best_metric_val = float("inf")
+            current_metric = val_metrics[self.early_stop_metric]
             if self.is_maximize:
                 is_best = current_metric > self.best_metric_val
             else:
@@ -315,6 +330,13 @@ class Trainer:
                 self.patience_counter += 1
 
             self.save_checkpoint(epoch, is_best=is_best)
+            if self.rank == 0:
+                import json
+                rec = {"epoch": epoch + 1, **{k: float(v) for k, v in train_metrics.items()},
+                       **{k: float(v) for k, v in val_metrics.items()}, "is_best": bool(is_best),
+                       "lr": float(self.optimizer.param_groups[0]["lr"]), "time_s": float(duration)}
+                with open(os.path.join(self.checkpoint_dir, "history.jsonl"), "a") as fh:
+                    fh.write(json.dumps(rec) + "\n")
 
             if self.rank == 0:
                 tr_cross = f" | Cross Acc: {train_metrics['train_acc_cross']:.1f}%" if "train_acc_cross" in train_metrics else ""

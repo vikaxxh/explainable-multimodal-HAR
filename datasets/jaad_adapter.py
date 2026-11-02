@@ -74,8 +74,7 @@ class JAADAdapter:
                 print(f"[JAADAdapter] Found {len(xml_files)} official JAAD XML annotation files in {xml_dir}. Parsing...")
                 return self._parse_jaad_xml_dir(xml_files)
 
-        print("[JAADAdapter] No local JAAD file found. Providing mock/synthetic loader interface.")
-        return self._generate_mock_jaad_structure()
+        raise FileNotFoundError(f"[JAADAdapter] No JAAD annotations found under {self.jaad_root} (synthetic fallback removed).")
 
     def _parse_jaad_xml_dir(self, xml_files: List[str]) -> Dict[str, Any]:
         """Parses official JAAD XML annotation files into standard schema."""
@@ -260,6 +259,9 @@ class JAADAdapter:
         train_vids = load_ids("train.txt")
         val_vids = load_ids("val.txt")
         test_vids = load_ids("test.txt")
+        if train_vids is None or val_vids is None or test_vids is None:
+            # Without split files every video would land in train, val AND test.
+            raise FileNotFoundError(f"[JAADAdapter] Missing train/val/test.txt in {target_dir}")
 
         print(f"[JAADAdapter] Extracting sequences by official JAAD_{split_type} split...")
         train_seqs = self.extract_sequences_from_annotations(jaad_data, max_samples=max_samples_per_split, video_filter=train_vids)

@@ -1,0 +1,19 @@
+#!/bin/bash
+#PBS -N cvmi_train
+#PBS -q dgx
+#PBS -l select=1:ncpus=10:ngpus=1:mem=32gb
+#PBS -l place=free
+#PBS -l walltime=12:00:00
+#PBS -j oe
+# Usage: qsub -v MODEL=traj_full,SEED=42 scripts_hpc/pbs_cvmi_train.pbs
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+PY="$HOME/.conda/envs/emit-har/bin/python"
+export PYTHONUNBUFFERED=1
+MODEL=${MODEL:?set MODEL}; SEED=${SEED:?set SEED}
+OUT="experiments/checkpoints/cvmi/${MODEL}_seed${SEED}"
+mkdir -p "$OUT"
+exec > >(tee -a "$OUT/train.log") 2>&1
+echo "Job $PBS_JOBID | model=$MODEL seed=$SEED | $(date)"
+$PY train.py --config configs/cvmi_pie_tte.yaml --model "$MODEL" --seed "$SEED" \
+    --data_dir data/processed_pie_tte --checkpoint_dir "$OUT"
+echo "Finished $(date)"

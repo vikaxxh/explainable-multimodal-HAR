@@ -52,6 +52,8 @@ class ProposedXMISTModel(nn.Module):
         use_interaction: bool = True,
         use_modality_gating: bool = True,
         edge_mode: str = "full",
+        distance_threshold: float = 12.0,
+        min_closing_speed: float = 1e-3,
         num_ped_classes: int = len(PEDESTRIAN_CLASSES),
         num_micro_classes: int = len(MICROMOBILITY_CLASSES),
         num_inter_classes: int = len(INTERACTION_CLASSES),
@@ -67,6 +69,12 @@ class ProposedXMISTModel(nn.Module):
         self.use_interaction = use_interaction
         self.use_modality_gating = use_modality_gating
         self.edge_mode = edge_mode
+        self.num_modalities = int(use_rgb) + int(use_pose) + int(use_traj) + int(use_scene)
+        if self.num_modalities == 0:
+            raise ValueError("At least one modality must be enabled")
+        # With a single enabled modality, cross-modal attention and gating are skipped
+        # (gating over zero tensors would only add noise and spurious attribution).
+        self.single_modality = (self.num_modalities == 1)
 
         # 1. Modality Encoders
         if use_rgb:
@@ -79,18 +87,23 @@ class ProposedXMISTModel(nn.Module):
             self.scene_encoder = SceneEncoder(num_classes=10, feature_dim=feature_dim, dropout=dropout)
 
         # 2. Cross-Modal Attention
-        if use_cross_modal:
+        if use_cross_modal and not self.single_modality:
             self.cross_modal_fusion = CrossModalFusion(feature_dim=feature_dim, dropout=dropout)
 
         # 3. Modality Gating & Adaptive Fusion
-        if use_modality_gating:
+        if self.single_modality:
+            pass
+        elif use_modality_gating:
             self.modality_gating = ModalityGating(feature_dim=feature_dim, num_modalities=4)
         else:
             self.simple_fusion = nn.Linear(feature_dim * 4, feature_dim)
 
         # 4. Dynamic Interaction Graph & Transformer
         if use_interaction:
-            self.interaction_graph = DynamicInteractionGraph(edge_dim=4, edge_embed_dim=64, distance_threshold=12.0, edge_mode=edge_mode)
+            self.interaction_graph = DynamicInteractionGraph(
+                edge_dim=4, edge_embed_dim=64, distance_threshold=distance_threshold,
+                edge_mode=edge_mode, min_closing_speed=min_closing_speed
+            )
             self.interaction_transformer = DynamicInteractionTransformer(feature_dim=feature_dim, edge_embed_dim=64, dropout=dropout)
 
         # 5. Spatio-Temporal Sequence Transformer
@@ -112,21 +125,38 @@ class ProposedXMISTModel(nn.Module):
         T = batch["trajectory"].shape[1]
 
         # 1. Encode Modalities
-        f_rgb = self.rgb_encoder(batch["rgb"]) if self.use_rgb else torch.zeros(B, T, self.feature_dim, device=device)
-        f_pose = self.pose_encoder(batch["pose"]) if self.use_pose else torch.zeros(B, T, self.feature_dim, device=device)
-        f_traj = self.traj_encoder(batch["trajectory"]) if self.use_traj else torch.zeros(B, T, self.feature_dim, device=device)
-        f_scene = self.scene_encoder(batch["scene"]) if self.use_scene else torch.zeros(B, T, self.feature_dim, device=device)
+        def zeros():
+            return torch.zeros(B, T, self.feature_dim, device=device)
+
+        for name, flag in [("pose", self.use_pose), ("scene", self.use_scene)]:
+            if flag and name not in batch:
+                raise KeyError(f"Model was built with use_{name}=True but batch has no '{name}' tensor")
+
+        if self.use_rgb and "rgb" not in batch:
+            # Legacy checkpoints trained with all-zero RGB placeholders: reproduce that input exactly.
+            if not getattr(self, "_warned_rgb", False):
+                print("[ProposedXMISTModel] WARNING: use_rgb=True but no 'rgb' in batch; using zero-RGB features (legacy placeholder behaviour).")
+                self._warned_rgb = True
+            f_rgb = self.rgb_encoder.encode_zero(B, T, device)
+        else:
+            f_rgb = self.rgb_encoder(batch["rgb"]) if self.use_rgb else zeros()
+        f_pose = self.pose_encoder(batch["pose"]) if self.use_pose else zeros()
+        f_traj = self.traj_encoder(batch["trajectory"]) if self.use_traj else zeros()
+        f_scene = self.scene_encoder(batch["scene"]) if self.use_scene else zeros()
 
         # 2. Cross-Modal Attention
         cross_attn_maps = {}
-        if self.use_cross_modal and self.use_rgb and self.use_pose and self.use_traj and self.use_scene:
+        if (not self.single_modality) and self.use_cross_modal and self.use_rgb and self.use_pose and self.use_traj and self.use_scene:
             enhanced_mods, cross_attn_maps = self.cross_modal_fusion(f_rgb, f_pose, f_traj, f_scene)
         else:
             enhanced_mods = {"rgb": f_rgb, "pose": f_pose, "traj": f_traj, "scene": f_scene}
 
         # 3. Modality Gating
         modality_weights = None
-        if self.use_modality_gating:
+        if self.single_modality:
+            only = [k for k, flag in [("rgb", self.use_rgb), ("pose", self.use_pose), ("traj", self.use_traj), ("scene", self.use_scene)] if flag][0]
+            f_multi = enhanced_mods[only]
+        elif self.use_modality_gating:
             f_multi, modality_weights = self.modality_gating(enhanced_mods)
         else:
             cat = torch.cat([enhanced_mods["rgb"], enhanced_mods["pose"], enhanced_mods["traj"], enhanced_mods["scene"]], dim=-1)

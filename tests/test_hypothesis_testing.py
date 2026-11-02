@@ -38,13 +38,27 @@ class TestHypothesisTesting(unittest.TestCase):
         cluster_ids = np.array([1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
 
         ci = cluster_bootstrap_ci(
-            accuracy_score, y_true, y_pred, cluster_ids, num_bootstrap=50, seed=42
+            accuracy_score, y_true, y_pred, cluster_ids, num_bootstrap=500, seed=42
         )
         self.assertIn("point_estimate", ci)
         self.assertIn("ci_lower", ci)
         self.assertIn("ci_upper", ci)
         self.assertLessEqual(ci["ci_lower"], ci["point_estimate"])
         self.assertGreaterEqual(ci["ci_upper"], ci["point_estimate"])
+
+    def test_cluster_bootstrap_ci_degenerate_returns_nan(self):
+        # Too few resamples / clusters must NOT produce a CI equal to the point estimate
+        y_true = np.array([0, 1, 0, 1, 0, 1])
+        y_pred = np.array([0, 1, 0, 1, 0, 0])
+        ci = cluster_bootstrap_ci(accuracy_score, y_true, y_pred, np.array([1, 1, 2, 2, 3, 3]), num_bootstrap=500)
+        self.assertTrue(np.isnan(ci["ci_lower"]))
+        self.assertFalse(ci["ci_lower"] > 0)
+
+    def test_holm_is_step_down(self):
+        res = holm_bonferroni([0.01, 0.04, 0.03])
+        self.assertTrue(res[0][1])
+        self.assertFalse(res[2][1])
+        self.assertFalse(res[1][1])  # 0.04 cannot be significant when 0.03 is not
 
     def test_h3_matched_control_paired_testing(self):
         # Scenario: top neighbor removal drops confidence consistently more than matched control
