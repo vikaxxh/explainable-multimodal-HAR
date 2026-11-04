@@ -1,0 +1,13 @@
+#!/bin/bash
+#PBS -N cvmi_baselines
+#PBS -q short
+#PBS -l select=1:ncpus=10:mem=32gb
+#PBS -l walltime=01:00:00
+#PBS -j oe
+# Simple-feature (shortcut) baselines on PIE TTE, CPU only. Exploratory, post protocol lock.
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+PY="$HOME/.conda/envs/emit-har/bin/python"
+export PYTHONUNBUFFERED=1 OMP_NUM_THREADS=10
+set -eo pipefail
+$PY tools/shortcut_baselines.py --data_dir data/processed_pie_tte --splits val test \
+    --output_dir experiments/results/cvmi_baselines
