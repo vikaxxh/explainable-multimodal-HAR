@@ -9,6 +9,7 @@
 cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
 PY="$HOME/.conda/envs/emit-har/bin/python"
 export PYTHONUNBUFFERED=1
+set -eo pipefail
 MODEL=${MODEL:?set MODEL}; SEED=${SEED:?set SEED}
 OUT="experiments/checkpoints/cvmi/${MODEL}_seed${SEED}"
 mkdir -p "$OUT"

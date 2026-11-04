@@ -1,6 +1,6 @@
 # CVMI 2027 Evaluation Protocol (fill in date + commit hash, commit BEFORE any Set 03 run)
 
-Date locked: ____  Commit: ____
+Date locked: 2026-11-04  Commit: 36bd0c5
 
 ## Disclosure
 Earlier pipeline versions (before this protocol) ran trained models on PIE Set 03
@@ -8,6 +8,9 @@ Earlier pipeline versions (before this protocol) ran trained models on PIE Set 0
 labelling (crossing anywhere inside a 32-frame window), a wrong time step (1/10 s instead of 1/30 s)
 and placeholder RGB/pose/scene inputs. All of those results are discarded. The benchmark below is a new
 configuration; Set 03 under this configuration has not been evaluated.
+
+Validation results (Set 05/06) were inspected before locking: ΔAUC full vs isolated = +0.0072,
+95% CI [-0.0063, +0.0222] (227 tracks). Nothing was changed after seeing them.
 
 ## Data
 - PIE, official splits: train set01/02/04, val set05/06, test set03.
@@ -22,6 +25,7 @@ configuration; Set 03 under this configuration has not been evaluated.
 - `traj_full`: same + neighbour interaction transformer (learned token when no neighbour).
 - Config `configs/cvmi_pie_tte.yaml`; seeds 42, 100, 2024; checkpoint = max validation ROC-AUC,
   early stopping patience 10. No hyper-parameter tuning on Set 03.
+- All six runs trained on CPU (10 cores, PBS `long`/`short` queues) because no GPU was free.
 
 ## Primary hypothesis (H2)
 ΔAUC = AUC(traj_full seed-ensemble) - AUC(traj_isolated seed-ensemble) on Set 03.
