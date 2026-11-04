@@ -11,6 +11,9 @@ cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
 PY="$HOME/.conda/envs/emit-har/bin/python"
 export PYTHONUNBUFFERED=1
 DATA=${DATA:-data/processed_pie_tte}; TAG=${TAG:-cvmi}; DOC=${DOC:-docs/cvmi_protocol_lock.md}
+set -o pipefail
+exec > >(tee -a "$PWD/${TAG}_eval_val.log") 2>&1
+echo "Job $PBS_JOBID | $(date) | $(git rev-parse --short HEAD 2>&1)"
 C=experiments/checkpoints/${TAG}
 $PY tools/eval_paper.py --data_dir "$DATA" --split val \
   --full_ckpts $C/traj_full_seed42/checkpoint_best.pt $C/traj_full_seed100/checkpoint_best.pt $C/traj_full_seed2024/checkpoint_best.pt \
