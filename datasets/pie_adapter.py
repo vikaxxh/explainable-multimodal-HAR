@@ -478,6 +478,7 @@ class PIEAdapter:
         num_neighbors: int = 4,
         neighbor_radius: float = 0.20,
         image_size: Tuple[float, float] = (1920.0, 1080.0),
+        dataset_name: str = "PIE",
     ) -> List[Dict[str, Any]]:
         """
         Builds observation windows that END 30-60 frames (1-2 s at 30 fps) BEFORE the crossing event.
@@ -490,17 +491,14 @@ class PIEAdapter:
         - Windows of obs_len frames are slid with the given overlap so that their last frame lies in
           [event - tte_range[1], event - tte_range[0]].
         Kinematics use dt = 1 / fps (PIE is annotated at 30 fps).
-        Coordinates are box centres normalised by image size (x / 1920, y / 1080).
+        Coordinates are box centres normalised by image size (x / 1920, y / 1080); a video may override
+        the size with an 'image_size' entry (JAAD has clips of different resolutions).
         """
         dt = 1.0 / fps
         stride = max(1, int(round(obs_len * (1.0 - overlap))))
-        W, H = image_size
         tte_lo, tte_hi = tte_range
         sequences: List[Dict[str, Any]] = []
         stats = {"tracks_seen": 0, "irrelevant": 0, "too_short": 0, "used_tracks": 0, "crossing_tracks": 0}
-
-        def centres(box_list):
-            return np.array([[(b[0] + b[2] / 2.0) / W, (b[1] + b[3] / 2.0) / H] for b in box_list], dtype=np.float32)
 
         for set_id, videos in pie_data.items():
             if not isinstance(videos, dict):
@@ -513,6 +511,10 @@ class PIEAdapter:
                     continue
                 ped_annotations = video_content.get("ped_annotations", {})
                 vehicle_annotations = video_content.get("vehicle_annotations", {})
+                W, H = video_content.get("image_size", image_size)
+
+                def centres(box_list, W=W, H=H):
+                    return np.array([[(b[0] + b[2] / 2.0) / W, (b[1] + b[3] / 2.0) / H] for b in box_list], dtype=np.float32)
 
                 frame_index: Dict[str, Dict[int, List[float]]] = {}
                 agent_type: Dict[str, str] = {}
@@ -590,7 +592,7 @@ class PIEAdapter:
                             "inter_label": 0,
                             "agent_type": "pedestrian",
                             "metadata": {
-                                "dataset": "PIE", "protocol": "tte_30_60_obs16",
+                                "dataset": dataset_name, "protocol": "tte_30_60_obs16",
                                 "set_id": set_id, "video_id": video_id, "ped_id": ped_id,
                                 "event_frame": int(event_frame), "obs_end_frame": int(end_frame),
                                 "tte_frames": int(event_frame - end_frame),

@@ -46,14 +46,14 @@ def git_state():
     return {"commit": run("rev-parse", "HEAD"), "dirty_files": (run("status", "--porcelain") or "").splitlines()}
 
 
-def check_protocol_lock(git):
+def check_protocol_lock(git, doc=PROTOCOL_DOC):
     """The test split may only be evaluated once the protocol note is committed with its lock commit."""
-    if not os.path.exists(PROTOCOL_DOC):
-        sys.exit(f"Protocol note missing: {PROTOCOL_DOC}")
-    text = open(PROTOCOL_DOC).read()
+    if not os.path.exists(doc):
+        sys.exit(f"Protocol note missing: {doc}")
+    text = open(doc).read()
     m = re.search(r"Commit:\s*([0-9a-fA-F]{7,40})", text)
     if not m or "____" in text.split("\n## ")[0]:
-        sys.exit("docs/cvmi_protocol_lock.md is not locked (fill in 'Date locked' and 'Commit', then commit it).")
+        sys.exit(f"{os.path.relpath(doc, REPO)} is not locked (fill in 'Date locked' and 'Commit', then commit it).")
     lock = m.group(1)
     if git["commit"] is None:
         sys.exit("Cannot verify protocol lock: not a git checkout.")
@@ -62,8 +62,8 @@ def check_protocol_lock(git):
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except subprocess.CalledProcessError:
         sys.exit(f"Protocol lock commit {lock} is not an ancestor of HEAD {git['commit'][:10]}.")
-    if any(PROTOCOL_DOC.endswith(l.split()[-1]) for l in git["dirty_files"]):
-        sys.exit("docs/cvmi_protocol_lock.md has uncommitted changes.")
+    if any(doc.endswith(l.split()[-1]) for l in git["dirty_files"]):
+        sys.exit(f"{os.path.relpath(doc, REPO)} has uncommitted changes.")
     return lock
 
 
@@ -171,11 +171,12 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--mmes", type=float, default=0.015, help="Minimum meaningful ΔAUC")
     ap.add_argument("--frozen", action="store_true")
+    ap.add_argument("--protocol_doc", default=PROTOCOL_DOC, help="Locked protocol note required for --split test")
     args = ap.parse_args()
     if args.split == "test" and not args.frozen:
         sys.exit("Refusing to touch the test split without --frozen.")
     git = git_state()
-    lock_commit = check_protocol_lock(git) if args.split == "test" else None
+    lock_commit = check_protocol_lock(git, os.path.abspath(args.protocol_doc)) if args.split == "test" else None
     if git["dirty_files"]:
         print(f"WARNING: {len(git['dirty_files'])} uncommitted file(s); results will record a dirty tree.")
     os.makedirs(args.output_dir, exist_ok=True)

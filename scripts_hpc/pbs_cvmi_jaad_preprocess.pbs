@@ -1,0 +1,13 @@
+#!/bin/bash
+#PBS -N cvmi_jaad_prep
+#PBS -q short
+#PBS -l select=1:ncpus=10:mem=32gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+# Builds JAAD_beh time-to-event dataset with the PIE protocol + sanity report. CPU only.
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+PY="$HOME/.conda/envs/emit-har/bin/python"
+export PYTHONUNBUFFERED=1
+set -eo pipefail
+$PY preprocess_jaad_tte.py --jaad_dir data/raw/JAAD --output_dir data/processed_jaad_tte --subset beh --clean
+$PY tools/check_tte_data.py --data_dir data/processed_jaad_tte
