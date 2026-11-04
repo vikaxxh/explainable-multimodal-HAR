@@ -52,7 +52,10 @@ def features(d):
     mean_v = t[:, :, 2:4].mean(1)
     std_v = t[:, :, 2:4].std(1)
     disp = t[:, -1, :2] - t[:, 0, :2]
+    speed = np.linalg.norm(t[:, :, 2:4], axis=-1)
     return {
+        "speed_only": np.c_[speed.mean(1), speed[:, -1]],
+        "motion_only": np.c_[scale_rate, mean_v, std_v, disp, speed.mean(1), speed[:, -1]],
         "box_size_only": np.c_[w, h],
         "position_only": np.c_[x, y, edge],
         "position_box": np.c_[x, y, edge, w, h],
