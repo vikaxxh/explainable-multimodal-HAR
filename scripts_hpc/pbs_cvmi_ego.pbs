@@ -1,0 +1,16 @@
+#!/bin/bash
+#PBS -N cvmi_ego
+#PBS -q short
+#PBS -l select=1:ncpus=10:mem=32gb
+#PBS -l walltime=01:00:00
+#PBS -j oe
+# Ego-motion analysis on PIE (OBD speed), CPU only. Exploratory, post protocol lock.
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+PY="$HOME/.conda/envs/emit-har/bin/python"
+export PATH="$HOME/.conda/envs/emit-har/bin:$PATH"
+export PYTHONUNBUFFERED=1 OMP_NUM_THREADS=10
+exec > >(tee -a "$PWD/cvmi_ego.log") 2>&1
+echo "Job $PBS_JOBID | $(date) | $(git rev-parse --short HEAD 2>&1)"
+set -eo pipefail
+$PY tools/ego_motion_analysis.py --data_dir data/processed_pie_tte --pie_root data/raw/PIE \
+    --predictions experiments/results/cvmi_test/predictions_test.npz --output_dir experiments/results/cvmi_ego
