@@ -145,8 +145,9 @@ Neighbours are present in most windows: $K\ge1$ in 85.6\% of PIE test windows (9
 \centering
 \caption{\dauc{} (interaction $-$ comparison), seed ensembles, 95\% track-bootstrap CI.}
 \label{tab:delta}
+\footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{lcc}
+\begin{tabular}{@{}lcc@{}}
 \toprule
 Comparison & PIE (675 tracks) & JAAD (154 tracks) \\
 \midrule
@@ -197,26 +198,28 @@ The controls show that the PIE model does read its neighbour inputs: replacing n
 \centering
 \caption{Mechanism tests on the test splits (seed ensembles).}
 \label{tab:mech}
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{lcc}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{@{}lcc@{}}
 \toprule
  & PIE & JAAD \\
 \midrule
-\multicolumn{3}{l}{\emph{H3: removing the top-attended vs.\ a matched neighbour}} \\
+\multicolumn{3}{@{}l}{\emph{H3: remove top-attended vs.\ matched neighbour}} \\
 Matched windows / tracks & 709 / 210 & 168 / 51 \\
 Mean $|\Delta p|$ target / control & 0.025 / 0.010 & 0.032 / 0.025 \\
-Median $\delta$ [95\% CI] & $+0.0034$ [$+0.0018$, $+0.0054$] & $+0.0040$ [$+0.0008$, $+0.0082$] \\
+Median $\delta$ & $+0.0034$ & $+0.0040$ \\
+\quad 95\% CI & [$+0.0018$, $+0.0054$] & [$+0.0008$, $+0.0082$] \\
 Target is most influential & 52\% & 32\% \\
-Wilcoxon $p$ (track means) & $2\times10^{-16}$ & 0.11 \\
+Wilcoxon~\cite{wilcoxon1945} $p$, track means & $2\times10^{-16}$ & 0.11 \\
 \midrule
-\multicolumn{3}{l}{\emph{H4: co-rescaling approaching neighbours' motion}} \\
+\multicolumn{3}{@{}l}{\emph{H4: rescale approaching neighbours' motion}} \\
 Approaching units & 2{,}250 & 575 \\
-Median $\rho(\alpha, p)$ real / placebo & $-0.20$ / $-1.00$ & $+0.49$ / $+0.83$ \\
-Expected sign real / placebo & 44.6\% / 60.0\% & 33.6\% / 29.2\% \\
-McNemar~\cite{mcnemar1947} $p$ (one-sided) & 1.00 & 0.061 \\
-Mahalanobis, unperturbed / $\alpha{=}2$ & 2.00 / 2.87 & 1.96 / 2.77 \\
+Median $\rho$, real / placebo & $-0.20$ / $-1.00$ & $+0.49$ / $+0.83$ \\
+Expected sign, real / placebo & 44.6\% / 60.0\% & 33.6\% / 29.2\% \\
+McNemar~\cite{mcnemar1947} $p$, one-sided & 1.00 & 0.061 \\
+Mahalanobis, orig.\ / $\alpha{=}2$ & 2.00 / 2.87 & 1.96 / 2.77 \\
 \midrule
-Holm-adjusted $p$: H2 / H3 / H4 & 1.00 / $<10^{-4}$ / 1.00 & 0.47 / 0.34 / 0.24 \\
+Holm $p$: H2 / H3 / H4 & 1.00 / $<10^{-4}$ / 1.00 & 0.47 / 0.34 / 0.24 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -231,8 +234,9 @@ Holm-adjusted $p$: H2 / H3 / H4 & 1.00 / $<10^{-4}$ / 1.00 & 0.47 / 0.34 / 0.24 
 \centering
 \caption{Simple-feature baselines (test AUC, 95\% track-bootstrap CI; exploratory). LR: logistic regression, GB: gradient boosting.}
 \label{tab:base}
+\footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{lcc}
+\begin{tabular}{@{}lcc@{}}
 \toprule
 Features & PIE & JAAD \\
 \midrule
