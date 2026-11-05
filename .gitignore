@@ -83,3 +83,10 @@ experiments/configs/*
 wandb/
 runs/
 .cache/
+
+# CVMI time-to-event datasets (licensed PIE/JAAD derivatives) and HPC job logs
+data/processed_*_tte/
+data/raw/JAAD_repo/
+/*.log
+/*.pbslog
+_backup_pre_cvmi/
