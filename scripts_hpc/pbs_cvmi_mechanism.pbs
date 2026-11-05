@@ -1,0 +1,22 @@
+#!/bin/bash
+#PBS -N cvmi_mechanism
+#PBS -q short
+#PBS -l select=1:ncpus=10:mem=32gb
+#PBS -l walltime=02:00:00
+#PBS -j oe
+# H1-H4 (28 Sep protocol) on the CVMI traj checkpoints. CPU only.
+# PIE:  qsub scripts_hpc/pbs_cvmi_mechanism.pbs
+# JAAD: qsub -v DATA=data/processed_jaad_tte,TAG=cvmi_jaad scripts_hpc/pbs_cvmi_mechanism.pbs
+cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
+PY="$HOME/.conda/envs/emit-har/bin/python"
+export PATH="$HOME/.conda/envs/emit-har/bin:$PATH"  # compute nodes have no system git
+export PYTHONUNBUFFERED=1 OMP_NUM_THREADS=10
+DATA=${DATA:-data/processed_pie_tte}; TAG=${TAG:-cvmi}; SPLIT=${SPLIT:-test}
+exec > >(tee -a "$PWD/${TAG}_mechanism_${SPLIT}.log") 2>&1
+echo "Job $PBS_JOBID | $(date) | $(git rev-parse --short HEAD 2>&1)"
+set -eo pipefail
+C=experiments/checkpoints/${TAG}
+$PY tools/eval_mechanism.py --data_dir "$DATA" --split "$SPLIT" \
+  --full_ckpts $C/traj_full_seed42/checkpoint_best.pt $C/traj_full_seed100/checkpoint_best.pt $C/traj_full_seed2024/checkpoint_best.pt \
+  --iso_ckpts  $C/traj_isolated_seed42/checkpoint_best.pt $C/traj_isolated_seed100/checkpoint_best.pt $C/traj_isolated_seed2024/checkpoint_best.pt \
+  --output_dir "experiments/results/${TAG}_mechanism_${SPLIT}"
