@@ -9,6 +9,7 @@
 #        JAAD: add DATA=data/processed_jaad_tte,TAG=cvmi_jaad
 cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
 PY="$HOME/.conda/envs/emit-har/bin/python"
+export PATH="$HOME/.conda/envs/emit-har/bin:$PATH"  # compute nodes have no system git
 export PYTHONUNBUFFERED=1
 set -eo pipefail
 MODEL=${MODEL:?set MODEL}; SEED=${SEED:?set SEED}

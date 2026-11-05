@@ -9,6 +9,7 @@
 # ONE-TIME held-out Set 03 evaluation. Run only after docs/cvmi_protocol_lock.md is committed.
 cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
 PY="$HOME/.conda/envs/emit-har/bin/python"
+export PATH="$HOME/.conda/envs/emit-har/bin:$PATH"  # compute nodes have no system git
 export PYTHONUNBUFFERED=1
 DATA=${DATA:-data/processed_pie_tte}; TAG=${TAG:-cvmi}; DOC=${DOC:-docs/cvmi_protocol_lock.md}
 set -o pipefail

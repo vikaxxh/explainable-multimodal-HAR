@@ -7,6 +7,7 @@
 # Builds JAAD_beh time-to-event dataset with the PIE protocol + sanity report. CPU only.
 cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
 PY="$HOME/.conda/envs/emit-har/bin/python"
+export PATH="$HOME/.conda/envs/emit-har/bin:$PATH"  # compute nodes have no system git
 export PYTHONUNBUFFERED=1
 exec > >(tee -a "$PWD/cvmi_jaad_preprocess.log") 2>&1
 echo "Job $PBS_JOBID | $(date) | $(git rev-parse --short HEAD 2>&1)"
