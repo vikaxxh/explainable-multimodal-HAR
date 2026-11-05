@@ -1,10 +1,15 @@
 # CVMI 2027 JAAD Replication Protocol (fill in date + commit hash, commit BEFORE any JAAD test run)
 
-Date locked: ____  Commit: ____
+Date locked: 2026-11-05  Commit: de82a59
 
 ## Status
 Written 2026-11-04, after the PIE protocol was locked (`docs/cvmi_protocol_lock.md`, commit 36bd0c5) and
 before any JAAD data was preprocessed. The JAAD replication is secondary to the PIE H2 test.
+
+Locked 2026-11-05 after the JAAD validation run (models trained from commit de82a59). Validation results
+seen before locking (149 windows, 28 tracks): ΔAUC full vs isolated = +0.082, 95% CI [-0.054, +0.238];
+neighbours removed -0.123, neighbours shuffled -0.183 AUC. Nothing was changed after seeing them.
+The PIE Set 03 result (ΔAUC +0.0023, CI [-0.0078, +0.0143]) was known when JAAD was run.
 
 ## Data
 - JAAD_beh (pedestrians with behavioural tags), official video-disjoint splits in
