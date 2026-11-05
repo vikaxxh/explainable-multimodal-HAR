@@ -9,8 +9,9 @@ cd "$HOME/explainable-multimodal-HAR" || cd "$PBS_O_WORKDIR" || exit 1
 PY="$HOME/.conda/envs/emit-har/bin/python"
 export PATH="$HOME/.conda/envs/emit-har/bin:$PATH"  # compute nodes have no system git
 export PYTHONUNBUFFERED=1 OMP_NUM_THREADS=10
-exec > >(tee -a "$PWD/cvmi_baselines.log") 2>&1
+DATA=${DATA:-data/processed_pie_tte}; TAG=${TAG:-cvmi}
+exec > >(tee -a "$PWD/${TAG}_baselines.log") 2>&1
 echo "Job $PBS_JOBID | $(date) | $(git rev-parse --short HEAD 2>&1)"
 set -eo pipefail
-$PY tools/shortcut_baselines.py --data_dir data/processed_pie_tte --splits val test \
-    --output_dir experiments/results/cvmi_baselines
+$PY tools/shortcut_baselines.py --data_dir "$DATA" --splits val test \
+    --output_dir "experiments/results/${TAG}_baselines"
