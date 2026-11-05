@@ -1,3 +1,27 @@
+# CVMI 2027 paper: neighbour interaction in pedestrian crossing prediction
+
+This repository contains the code for *"Present, Attended, but Not Useful: A Pre-Registered
+Re-Examination of Neighbour Interaction Modelling for Pedestrian Crossing Prediction"* (`paper/`).
+The paper uses **only** the trajectory pipeline listed below. The multimodal X-MIST description further
+down is the earlier project plan; its RGB/pose/scene components and the example report are **not**
+used in the paper, and results in `docs/pre_registration_lock_oct05_2026.md` and
+`docs/PROJECT_OVERVIEW_AND_CURRENT_STATUS.md` come from discarded earlier models.
+
+| Step | Code | HPC script |
+|---|---|---|
+| Protocols | `docs/preregistered_evaluation_protocol.md` (H1-H4, 28 Sep 2026), `docs/cvmi_protocol_lock.md` (PIE, locked at `36bd0c5`), `docs/cvmi_jaad_protocol_lock.md` (JAAD, locked at `de82a59`) | |
+| PIE data | `preprocess_pie_tte.py`, `datasets/pie_adapter.py` (`extract_tte_sequences`), `tools/check_tte_data.py` | `pbs_cvmi_preprocess.pbs` |
+| JAAD data | `preprocess_jaad_tte.py` | `setup_jaad_annotations.sh`, `pbs_cvmi_jaad_preprocess.pbs` |
+| Models | `train.py` (`traj_full`, `traj_isolated`), `models/proposed_model.py`, `models/interaction_transformer.py` | `pbs_cvmi_train.pbs`, `submit_cvmi_jaad.sh` |
+| H2 (locked) | `tools/eval_paper.py` | `pbs_cvmi_eval_val.pbs`, `pbs_cvmi_eval_test.pbs` |
+| H1-H4 | `tools/eval_mechanism.py` | `pbs_cvmi_mechanism.pbs` |
+| Baselines | `tools/shortcut_baselines.py` | `pbs_cvmi_baselines.pbs` |
+
+Config: `configs/cvmi_pie_tte.yaml` (both datasets, seeds 42/100/2024, CPU training). PIE and JAAD
+annotations must be obtained from their official sources; no dataset files are included here.
+
+---
+
 # X-MIST / EMIT-HAR: Explainable Multimodal Interaction-aware Spatio-Temporal Transformer
 
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-ee4c2c.svg)](https://pytorch.org/)
