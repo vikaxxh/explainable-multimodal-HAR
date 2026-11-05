@@ -121,22 +121,23 @@ Neighbours are present in most windows: $K\ge1$ in 85.6\% of PIE test windows (9
 
 \begin{table}[t]
 \centering
-\caption{Test-set performance (per-seed mean $\pm$ s.d., 3 seeds).}
+\caption{Test-set performance (per-seed mean $\pm$ s.d., 3 seeds; nbrs.: neighbours of the interaction model).}
 \label{tab:main}
+\footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{llccc}
+\begin{tabular}{@{}llccc@{}}
 \toprule
  & Model & AUC & PR-AUC & Brier \\
 \midrule
 \multirow{4}{*}{PIE} & Isolated & $0.947\pm.000$ & $0.823\pm.008$ & $0.131\pm.004$ \\
  & Interaction & $0.948\pm.003$ & $0.842\pm.016$ & $0.108\pm.004$ \\
- & \quad neighbours removed & $0.947\pm.001$ & $0.845\pm.003$ & $0.118\pm.004$ \\
- & \quad neighbours shuffled & $0.907\pm.007$ & $0.724\pm.025$ & $0.134\pm.004$ \\
+ & \quad nbrs.\ removed & $0.947\pm.001$ & $0.845\pm.003$ & $0.118\pm.004$ \\
+ & \quad nbrs.\ shuffled & $0.907\pm.007$ & $0.724\pm.025$ & $0.134\pm.004$ \\
 \midrule
 \multirow{4}{*}{JAAD} & Isolated & $0.718\pm.016$ & $0.693\pm.023$ & $0.236\pm.005$ \\
  & Interaction & $0.680\pm.028$ & $0.663\pm.022$ & $0.276\pm.016$ \\
- & \quad neighbours removed & $0.712\pm.021$ & $0.687\pm.022$ & $0.237\pm.012$ \\
- & \quad neighbours shuffled & $0.693\pm.024$ & $0.678\pm.018$ & $0.267\pm.021$ \\
+ & \quad nbrs.\ removed & $0.712\pm.021$ & $0.687\pm.022$ & $0.237\pm.012$ \\
+ & \quad nbrs.\ shuffled & $0.693\pm.024$ & $0.678\pm.018$ & $0.267\pm.021$ \\
 \bottomrule
 \end{tabular}
 \end{table}
