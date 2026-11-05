@@ -9,6 +9,7 @@
 \usepackage{xcolor}
 \usepackage{pgfplots}
 \pgfplotsset{compat=1.17}
+\usetikzlibrary{positioning,arrows.meta,fit,calc}
 \usepackage[hidelinks]{hyperref}
 
 \newcommand{\dauc}{$\Delta$AUC}
@@ -75,7 +76,37 @@ Hypotheses H1--H4, their decision rules and Holm correction~\cite{holm1979} were
 We follow the TTE windowing of~\cite{kotseruba2021benchmark}, with one difference noted below. A window holds 16 observed frames (30\,fps) whose last frame lies 30--60 frames before the event: the first frame annotated \emph{crossing} for crossing pedestrians, and the last annotated frame otherwise. This event definition for non-crossing pedestrians is our own choice and may differ from the reference implementation of~\cite{kotseruba2021benchmark}; absolute AUCs are therefore not directly comparable with published results. Windows are sampled with 60\% overlap; pedestrians annotated only as \emph{crossing-irrelevant} are excluded. PIE uses the official split (train Sets 01/02/04, validation 05/06, test 03); JAAD\textsubscript{beh} uses the official video-disjoint split. Inputs are box-centre kinematics $[x, y, v_x, v_y, \theta]$ in image coordinates normalised by each clip's resolution. Up to four neighbours are kept: agents annotated in all 16 frames whose mean distance to the pedestrian is at most 0.20 (PIE: pedestrians and vehicles; JAAD: pedestrians only, since JAAD has no vehicle boxes). $K$ denotes the number of neighbours at the last observed frame. The PIE test split contains 3{,}886 windows from 675 tracks (26\% crossing windows); the JAAD test split has 829 windows from 154 tracks (49\%). Validation splits are 1{,}320 windows / 227 tracks (PIE) and 149 / 28 (JAAD). Automated checks confirmed that no track appears in more than one split and that every time-to-event lies within 30--60 frames.
 
 \subsection{Models}
-Both models share a trajectory encoder (1-D temporal convolution followed by a 2-layer bidirectional GRU with 128 hidden units in total, projected to 256 dimensions), a 3-layer temporal transformer (4 heads) and a crossing head that pools over time with a learned query. \texttt{traj\_full} adds a 2-layer interaction transformer in which the pedestrian attends to its neighbours, using per-pair edge features (distance, relative velocity, heading difference, time-to-collision); neighbour tokens are embedded from the neighbours' own kinematics, a learned token replaces the neighbour set when $K=0$, and the result is added residually to the pedestrian features followed by layer normalisation. \texttt{traj\_isolated} omits this branch and is otherwise identical. Both are trained with focal loss ($\alpha=0.75$, $\gamma=2$, label smoothing 0.05), AdamW (learning rate $10^{-4}$, weight decay 0.01, cosine annealing to $10^{-6}$ over at most 60 epochs, no warm-up), batch size 32, dropout 0.3, horizontal-flip augmentation applied jointly to the pedestrian and its neighbours and early stopping on validation AUC (patience 10), with seeds 42, 100 and 2024, on CPU. The hyper-parameters were identical for both datasets and not tuned on any test split.
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[font=\scriptsize,
+  blk/.style={draw, rounded corners=2pt, align=center, text width=3.5cm, minimum height=0.62cm, fill=#1},
+  blk/.default=white, arr/.style={-{Stealth[length=1.6mm]}, semithick}]
+% shared path (both models)
+\node[blk=gray!10] (ped) at (0,0) {Pedestrian kinematics\\$[x,y,v_x,v_y,\theta]\times16$ frames};
+\node[blk=blue!8] (enc) at (0,-1.1) {Trajectory encoder\\Conv1D + 2-layer BiGRU $\rightarrow$ 256-d};
+\node[blk=white] (add) at (0,-2.35) {$+$ \;and LayerNorm};
+\node[blk=blue!8] (tmp) at (0,-3.4) {Temporal transformer\\3 layers, 4 heads};
+\node[blk=blue!8] (head) at (0,-4.5) {Learned-query pooling + MLP\\$\rightarrow p(\text{cross})$};
+% interaction branch (traj_full only)
+\node[blk=orange!12] (nb) at (4.1,0) {Neighbours ($\le4$) $\times$ 16 frames\\edges: distance, rel.\ speed,\\$\Delta\theta$, TTC to pedestrian};
+\node[blk=orange!12] (att) at (4.1,-2.35) {Interaction attention, 2 layers\\keys: neighbour tokens\\query: pedestrian feature\\learned token if $K=0$};
+\node[draw, dashed, rounded corners=3pt, inner sep=3pt, fit=(nb)(att),
+      label={[font=\scriptsize\itshape]below:\texttt{traj\_full} only}] (box) {};
+% arrows
+\draw[arr] (ped) -- (enc);
+\draw[arr] (enc) -- (add);
+\draw[arr] (add) -- (tmp);
+\draw[arr] (tmp) -- (head);
+\draw[arr] (ped.east) -- (nb.west);
+\draw[arr] (nb) -- (att);
+\draw[arr] (enc.east) -| ($(att.north west)!0.25!(att.north east)$);
+\draw[arr] (att.west) -- (add.east);
+\end{tikzpicture}
+\caption{The two models. Both share the trajectory encoder, temporal transformer and crossing head. \texttt{traj\_full} adds the interaction branch (dashed): at each frame the pedestrian feature attends over its neighbours, and the result is added to the pedestrian feature and layer-normalised. \texttt{traj\_isolated} omits the branch and the addition.}
+\label{fig:arch}
+\end{figure}
+
+Both models (Fig.~\ref{fig:arch}) share a trajectory encoder (1-D temporal convolution followed by a 2-layer bidirectional GRU with 128 hidden units in total, projected to 256 dimensions), a 3-layer temporal transformer (4 heads) and a crossing head that pools over time with a learned query. \texttt{traj\_full} adds a 2-layer interaction transformer in which the pedestrian attends to its neighbours, using per-pair edge features (distance, relative velocity, heading difference, time-to-collision); neighbour tokens are embedded from the neighbours' own kinematics, a learned token replaces the neighbour set when $K=0$, and the result is added residually to the pedestrian features followed by layer normalisation. \texttt{traj\_isolated} omits this branch and is otherwise identical. Both are trained with focal loss ($\alpha=0.75$, $\gamma=2$, label smoothing 0.05), AdamW (learning rate $10^{-4}$, weight decay 0.01, cosine annealing to $10^{-6}$ over at most 60 epochs, no warm-up), batch size 32, dropout 0.3, horizontal-flip augmentation applied jointly to the pedestrian and its neighbours and early stopping on validation AUC (patience 10), with seeds 42, 100 and 2024, on CPU. The hyper-parameters were identical for both datasets and not tuned on any test split.
 
 \subsection{Statistics}
 Each comparison uses the seed-ensemble (mean) probability of each model. Confidence intervals for \dauc{} come from a paired bootstrap that resamples pedestrian tracks (2{,}000 resamples for the locked H2 analysis, 1{,}000 for H1--H4), since windows from one track are correlated~\cite{efron1993bootstrap}. Strata with fewer than 25 tracks are treated as descriptive only. Two neighbour controls are applied to \texttt{traj\_full}: \emph{removed} (all neighbours masked) and \emph{shuffled} (neighbour sets taken from windows of other tracks).
